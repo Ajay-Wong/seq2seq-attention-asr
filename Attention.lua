@@ -1,9 +1,9 @@
 require 'nn';
 require 'nngraph';
 require 'AddBias';
-require 'RNNAttention2';
-require 'Recurrent2';
-require 'MonotonicAlignment2';
+require 'RNNAttention';
+require 'Recurrent';
+require 'MonotonicAlignment';
 require 'Squeeze';
 require 'ExpandAs';
 require 'AddDim';
@@ -37,7 +37,7 @@ function Attention:__init(decoder_recurrent,		-- recurrent part of the decoder ~
 	--self.T = T
 
 	------------------ construct attentional decoder ------------------
-	-- First, construct Vh separately, which will be less memory intensive than
+	-- First, construct Vh separately, which will be less computationally intensive than
 	-- if we add it to the RNN
 	------------------ Vh ------------------
 	local h 			= nn.Identity()()
@@ -53,6 +53,9 @@ function Attention:__init(decoder_recurrent,		-- recurrent part of the decoder ~
 
 	local nonrecurrent, prev_y       = input:split(2)
 	local prev_alpha,prev_s,prev_mem = prev_hidden:split(3)
+	local prev_s = nn.Identity()(prev_s)
+	self.prev_s = prev_s
+	prev_s.name = 'prev_s'
 	-- prev_alpha ~ L 
 	-- prev_s     ~ stateDepth 
 	-- prev_mem   ~ stateDepth
@@ -147,6 +150,10 @@ function Attention:__init(decoder_recurrent,		-- recurrent part of the decoder ~
 	local c_in        = nn.Linear(annotationDepth,stateDepth)(c)
 	local dec_rec_inp = nn.Linear(2*stateDepth,stateDepth)(nn.JoinTable(1,1)({c_in,y_in}))
 	local s,mem       = decoder_recurrent({dec_rec_inp,prev_s,prev_mem}):split(2)
+	self.s   = s
+	s.name = 's'
+	self.mem = mem
+	mem.name = 'mem'
 	decoder_recurrent.name = 'decoder_recurrent'
 
 	------------------ decoder_mlp ------------------
@@ -217,11 +224,11 @@ function Attention:getRNNlayer(layername)
 				local output = f.data.module.output
 				local size   = output:size():totable()
 				if batchSize == 0 then
-					layer[t] = output:view(1,unpack(size))
+					layer[t] = output:contiguous():view(1,unpack(size))
 				else
 					local b = table.remove(size,1)
 					assert(b == batchSize, 'inconsistent tensor sizes')
-					layer[t] = output:view(batchSize,1,unpack(size))
+					layer[t] = output:contiguous():view(batchSize,1,unpack(size))
 				end
 			end
 		end
