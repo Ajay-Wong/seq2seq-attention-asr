@@ -37,15 +37,18 @@ def getFiles(rootdir,printFiles=False):
             myid,filetype = myname.split('.')
             if filetype in ['PHN','TXT','WAV','WRD']:
                 dr,spkr,st = myid.split('/')
-                if not myid in files.keys():
-                    files[myid] = {}
-                    files[myid]['dr'] = dr
-                    files[myid]['spkr'] = spkr
-                    files[myid]['sent'] = st
-                    files[myid]['root'] = rootdir
-                files[myid][filetype] = myname
-                if printFiles:
-                    print myname
+				if st[:2] != 'SA':
+					if not myid in files.keys():
+						files[myid] = {}
+						files[myid]['dr'] = dr
+						files[myid]['spkr'] = spkr
+						files[myid]['sent'] = st
+						files[myid]['root'] = rootdir
+					files[myid][filetype] = myname
+					if printFiles:
+						print myname
+				else:
+					print 'ignored %s' % myname
     return files
 
 
