@@ -5,12 +5,13 @@ import os
 import h5py
 import pickle
 from optparse import OptionParser
+import sklearn.decomposition
 
 parser = OptionParser()
 parser.add_option('--root',help='root TIMIT dir',dest='root',default='TIMIT')
 parser.add_option('--save',help='save directory',dest='save',default='TIMIT')
 parser.add_option('--valid',help='validation speakerIDs',dest='valid',default='valid_spkrid.txt')
-parser.add_option('--samelenfeat',help='if True, all features will have same length',dest='samelenfeat',default=True)
+parser.add_option('--samelenfeat',help='if True, all features will have same length',dest='samelenfeat',default=False)
 parser.add_option('--samelenlabs',help='if True, all labels will have same length',dest='samelenlabs',default=False)
 (options, args) = parser.parse_args()
 
@@ -27,28 +28,32 @@ print 'rootdir            = %s' % rootdir
 print 'savedir            = %s' % savedir
 print 'validIDs           = %s' % options.valid
 
+os.system('mkdir -p %s' % savedir)
+
 #------------------- Load Files --------------------
 print 'loading files'
 def getFiles(rootdir,printFiles=False):
     files = {}
+    ignored = 0
     for root, dirnames, filenames in os.walk(rootdir):
         for f in filenames:
             myname = '/'.join(root.split('/')[-2:] + [f])
             myid,filetype = myname.split('.')
             if filetype in ['PHN','TXT','WAV','WRD']:
                 dr,spkr,st = myid.split('/')
-				if st[:2] != 'SA':
-					if not myid in files.keys():
-						files[myid] = {}
-						files[myid]['dr'] = dr
-						files[myid]['spkr'] = spkr
-						files[myid]['sent'] = st
-						files[myid]['root'] = rootdir
-					files[myid][filetype] = myname
-					if printFiles:
-						print myname
-				else:
-					print 'ignored %s' % myname
+                if st[:2] != 'SA':
+                    if not myid in files.keys():
+                        files[myid] = {}
+                        files[myid]['dr'] = dr
+                        files[myid]['spkr'] = spkr
+                        files[myid]['sent'] = st
+                        files[myid]['root'] = rootdir
+                    files[myid][filetype] = myname
+                    if printFiles:
+                        print myname
+                else:
+                    ignored += 1
+    print 'ignored %s files in %s' % (ignored,rootdir)
     return files
 
 
@@ -163,26 +168,65 @@ digitizePhonemes(validfiles)
 digitizePhonemes(testfiles)
 
 #------------------- generate features --------------------
-def logmel(filename,n_fft=2048,hop_length=512):
+def logmel(filename,n_fft=2048,hop_length=512,nfreqs=None):
     f = Sndfile(filename, 'r')
     data = f.read_frames(f.nframes)
     melspectrogram = librosa.feature.melspectrogram(y=data, sr=f.samplerate, n_fft=n_fft, hop_length=hop_length)
-    logmel = librosa.core.logamplitude(melspectrogram)[:40,:]
-    delta1 = librosa.feature.delta(logmel[:40,:],order=1)
-    delta2 = librosa.feature.delta(logmel[:40,:],order=2)
+    logmel = librosa.core.logamplitude(melspectrogram)
+    if nfreqs != None:
+        logmel = logmel[:nfreqs,:]
     energy = librosa.feature.rmse(y=data)
-    features = np.vstack((logmel,delta1,delta2,energy))
+    spectr = np.vstack((logmel,energy))
+    delta1 = librosa.feature.delta(spectr,order=1)
+    delta2 = librosa.feature.delta(spectr,order=2)
+
+    features = np.vstack((spectr,delta1,delta2))
     return features.T
 
-def CQT(filename, fmin=None, n_bins=84, hop_length=512):
+def logmel_stacked(filename,n_fft=2048,hop_length=512,nfreqs=None):
+    f = Sndfile(filename, 'r')
+    data = f.read_frames(f.nframes)
+    melspectrogram = librosa.feature.melspectrogram(y=data, sr=f.samplerate, n_fft=n_fft, hop_length=hop_length)
+    logmel = librosa.core.logamplitude(melspectrogram)
+    if nfreqs != None:
+        logmel = logmel[:nfreqs,:]
+    delta1 = librosa.feature.delta(logmel,order=1)
+    delta2 = librosa.feature.delta(logmel,order=2)
+    d,L    = logmel.shape
+    logmel = logmel.T.reshape(1,L,d)
+    delta1 = delta1.T.reshape(1,L,d)
+    delta2 = delta2.T.reshape(1,L,d)
+    features = np.vstack((logmel,delta1,delta2))
+    return features
+
+
+def CQT(filename, fmin=None, n_bins=84, hop_length=512,nfreqs=None):
     f = Sndfile(filename, 'r')
     data = f.read_frames(f.nframes)
     cqt = librosa.cqt(data, sr=f.samplerate, fmin=fmin, n_bins=n_bins, hop_length=hop_length)
-    delta1 = librosa.feature.delta(cqt[24:,:],order=1)
-    delta2 = librosa.feature.delta(cqt[24:,:],order=2)
+    if nfreqs != None:
+        cqt = cqt[:nfreqs,:]
+    delta1 = librosa.feature.delta(cqt,order=1)
+    delta2 = librosa.feature.delta(cqt,order=2)
     energy = librosa.feature.rmse(y=data)
     features = np.vstack((cqt,delta1,delta2,energy))
     return features.T
+
+def CQT_stacked(filename, fmin=None, n_bins=84, hop_length=512,nfreqs=None):
+    f = Sndfile(filename, 'r')
+    data = f.read_frames(f.nframes)
+    cqt = librosa.cqt(data, sr=f.samplerate, fmin=fmin, n_bins=n_bins, hop_length=hop_length)
+    if nfreqs != None:
+        cqt = cqt[:nfreqs,:]
+    delta1 = librosa.feature.delta(cqt,order=1)
+    delta2 = librosa.feature.delta(cqt,order=2)
+    d,L    = cqt.shape
+    cqt = cqt.T.reshape(1,L,d)
+    delta1 = delta1.T.reshape(1,L,d)
+    delta2 = delta2.T.reshape(1,L,d)
+    features = np.vstack((cqt,delta1,delta2))
+    return features
+
 
 def getFeatures(files,func=logmel,**kwargs):
     for k,f in files.iteritems():
@@ -216,6 +260,53 @@ def normalizeFeatures(train,valid,test,pad=10,use_samelength=False):
     
     return mean, std 
 
+def normalizeStackedFeatures(train,valid,test,pad=10,use_samelength=True):
+    maxlength = 0
+    featurelist = []
+    for k,f in train.iteritems():
+        maxlength = max(maxlength,len(f['features']))
+        featurelist.append(f['features'])
+    featurelist = np.concatenate(featurelist,axis=1)
+    a,b,c = featurelist.shape
+    mean = featurelist.mean(axis=1).reshape(a,1,c)
+    std = featurelist.std(axis=1).reshape(a,1,c)
+    
+    def normalize_and_pad(files):
+        for k,f in files.iteritems():
+            mylen = len(f['features'])
+            padding = np.zeros((3,pad,f['features'].shape[2]))
+            f['features'] = (f['features']-mean)/std
+            f['features'] = np.concatenate([padding,f['features'],padding],axis=1)
+            if use_samelength:
+                if mylen < maxlength:
+                    extra_padding = np.zeros((maxlength-mylen,f['features'].shape[1]))
+                    f['features'] = np.concatenate([f['features'],extra_padding],axis=1)
+    
+    normalize_and_pad(train)
+    normalize_and_pad(valid)
+    normalize_and_pad(test)
+    
+    return mean, std 
+
+def PCA(train,valid,test):
+    featurelist = []
+    for k,f in train.iteritems():
+        featurelist.append(f['features'])
+    featurelist = np.vstack(featurelist)
+    pca = sklearn.decomposition.PCA()
+    pca.fit(featurelist)
+
+    for k,f in train.iteritems():
+        f['features'] = pca.transform(f['features'])
+    
+    for k,f in valid.iteritems():
+        f['features'] = pca.transform(f['features'])
+    
+    for k,f in test.iteritems():
+        f['features'] = pca.transform(f['features'])
+
+    return pca
+
 #------------------- pickle --------------------
 def pickleIt(X,outputName):
     with open(outputName,'wb') as f:
@@ -227,10 +318,11 @@ def toHDF5(allfiles,filename):
         for g,files in allfiles.iteritems():
             grp = h.create_group(g)
             template = files[files.keys()[0]]
-            sequenceLength,featureDepth = template['features'].shape
             
             if featuresSameLength and phonemesSameLength:
-                features = [f['features'].reshape(1,sequenceLength,featureDepth) for f in files.values()]
+                sizes = list(template['features'].shape)
+                sizes = [1] + sizes
+                features = [f['features'].reshape(sizes) for f in files.values()]
                 labels = [np.array(f['phonemeLabels']).reshape(1,-1) for f in files.values()]
                 label_flags = [np.array(f['label_flag']).reshape(1,-1) for f in files.values()]
                 grp['x'] = np.vstack(features)
@@ -247,7 +339,7 @@ print 'generating logmel features'
 getFeatures(trainfiles,func=logmel)
 getFeatures(validfiles,func=logmel)
 getFeatures(testfiles,func=logmel)
-logmel_mean, logmel_std = normalizeFeatures(trainfiles,validfiles,testfiles,pad=4,use_samelength=featuresSameLength)
+logmel_mean, logmel_std = normalizeFeatures(trainfiles,validfiles,testfiles,pad=10,use_samelength=featuresSameLength)
 
 allfiles = {
     'train' : trainfiles,
@@ -258,12 +350,61 @@ allfiles = {
 toHDF5(allfiles,os.path.join(savedir,'logmel.h5'))
 pickleIt([logmel_mean, logmel_std],os.path.join(savedir,'logmel_mean_std.pkl'))
 
+#------------------- logmel123 features --------------------
+print 'generating logmel features'
+getFeatures(trainfiles,func=logmel,nfreqs=40)
+getFeatures(validfiles,func=logmel,nfreqs=40)
+getFeatures(testfiles,func=logmel,nfreqs=40)
+logmel_mean, logmel_std = normalizeFeatures(trainfiles,validfiles,testfiles,pad=10,use_samelength=featuresSameLength)
+
+allfiles = {
+    'train' : trainfiles,
+    'valid' : validfiles,
+    'test'  : testfiles
+}
+
+toHDF5(allfiles,os.path.join(savedir,'logmel123.h5'))
+pickleIt([logmel_mean, logmel_std],os.path.join(savedir,'logmel123_mean_std.pkl'))
+
+#------------------- logmel-stacked features --------------------
+print 'generating logmel-stacked features'
+getFeatures(trainfiles,func=logmel_stacked)
+getFeatures(validfiles,func=logmel_stacked)
+getFeatures(testfiles,func=logmel_stacked)
+logmel_mean, logmel_std = normalizeStackedFeatures(trainfiles,validfiles,testfiles,pad=10,use_samelength=featuresSameLength)
+
+allfiles = {
+    'train' : trainfiles,
+    'valid' : validfiles,
+    'test'  : testfiles
+}
+
+toHDF5(allfiles,os.path.join(savedir,'logmel_stacked.h5'))
+pickleIt([logmel_mean, logmel_std],os.path.join(savedir,'logmel_stacked_mean_std.pkl'))
+
+#------------------- logmel-pca features --------------------
+print 'generating logmel-pca features'
+getFeatures(trainfiles,func=logmel)
+getFeatures(validfiles,func=logmel)
+getFeatures(testfiles,func=logmel)
+logmel_pca = PCA(trainfiles,validfiles,testfiles)
+logmel_pca_mean, logmel_pca_std = normalizeFeatures(trainfiles,validfiles,testfiles,pad=10,use_samelength=featuresSameLength)
+
+allfiles = {
+    'train' : trainfiles,
+    'valid' : validfiles,
+    'test'  : testfiles
+}
+
+toHDF5(allfiles,os.path.join(savedir,'logmel_pca.h5'))
+pickleIt([logmel_pca, logmel_pca_mean, logmel_pca_std],os.path.join(savedir,'logmel_pca_mean_std.pkl'))
+
 #------------------- CQT features --------------------
 print 'generating cqt features'
 getFeatures(trainfiles,func=CQT)
 getFeatures(validfiles,func=CQT)
 getFeatures(testfiles,func=CQT)
-cqt_mean, cqt_std = normalizeFeatures(trainfiles,validfiles,testfiles,pad=4,use_samelength=featuresSameLength)
+cqt_mean, cqt_std = normalizeFeatures(trainfiles,validfiles,testfiles,pad=10,use_samelength=featuresSameLength)
 
 allfiles = {
     'train' : trainfiles,
@@ -273,3 +414,38 @@ allfiles = {
 
 toHDF5(allfiles,os.path.join(savedir,'cqt.h5'))
 pickleIt([cqt_mean, cqt_std],os.path.join(savedir,'cqt_mean_std.pkl'))
+
+#------------------- CQT-stacked features --------------------
+print 'generating cqt-stacked features'
+getFeatures(trainfiles,func=CQT_stacked)
+getFeatures(validfiles,func=CQT_stacked)
+getFeatures(testfiles,func=CQT_stacked)
+cqt_mean, cqt_std = normalizeStackedFeatures(trainfiles,validfiles,testfiles,pad=10,use_samelength=featuresSameLength)
+
+allfiles = {
+    'train' : trainfiles,
+    'valid' : validfiles,
+    'test'  : testfiles
+}
+
+toHDF5(allfiles,os.path.join(savedir,'cqt_stacked.h5'))
+pickleIt([cqt_mean, cqt_std],os.path.join(savedir,'cqt_stacked_mean_std.pkl'))
+
+#------------------- CQT-pca features --------------------
+print 'generating CQT-pca features'
+getFeatures(trainfiles,func=CQT)
+getFeatures(validfiles,func=CQT)
+getFeatures(testfiles,func=CQT)
+cqt_pca = PCA(trainfiles,validfiles,testfiles)
+cqt_pca_mean, cqt_pca_std = normalizeFeatures(trainfiles,validfiles,testfiles,pad=10,use_samelength=featuresSameLength)
+
+allfiles = {
+    'train' : trainfiles,
+    'valid' : validfiles,
+    'test'  : testfiles
+}
+
+toHDF5(allfiles,os.path.join(savedir,'cqt_pca.h5'))
+pickleIt([cqt_pca, cqt_pca_mean, cqt_pca_std],os.path.join(savedir,'cqt_pca_mean_std.pkl'))
+
+
