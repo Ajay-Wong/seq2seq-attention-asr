@@ -1,6 +1,6 @@
 require 'nn';
 package.path = package.path .. ';../?.lua'
-require 'Attention2';
+require 'Attention';
 require 'LSTM';
 require 'nngraph';
 require 'RNN';
@@ -8,8 +8,9 @@ require 'hdf5';
 require 'xlua';
 require 'optim';
 require 'cunn';
-package.path = package.path .. ';/home/jmj418/torch_utils/?.lua'
-require 'torch_utils/sopt';
+--package.path = package.path .. ';/home/jmj418/torch_utils/?.lua'
+--require 'torch_utils/sopt';
+TrainUtils = require 'TrainUtils'
 
 opt                 = opt                or {}
 opt.device          = opt.device         or 1
@@ -20,6 +21,7 @@ opt.batchSize       = opt.batchSize      or 1
 opt.maxnorm         = opt.maxnorm        or 1
 opt.weightDecay     = opt.weightDecay    or 1e-4
 opt.maxnumsamples   = opt.maxnumsamples  or 1e20
+opt.colnormconstr   = opt.colnormconstr  or false -- column norm constraint
 print(opt)
 
 cutorch.setDevice(opt.device)
@@ -176,42 +178,74 @@ function Train()
 	for t=1,numSamples,opt.batchSize do
 		collectgarbage()
 		xlua.progress(t+opt.batchSize-1,numSamples)
-		local index      = shuffle[t]
-		local X          = train.x[index]
-		local Y          = train.y[index]
-		local T          = Y:size(1)
 		local optimfunc = function(x)
 			if x ~= parameters then
 				parameters:copy(x)
 			end
-			autoencoder:zeroGradParameters()
-			local labelmask = torch.zeros(T,model.outputDepth):cuda():scatter(2,Y:view(T,1),1)
-			local logprobs  = autoencoder:forward({X,labelmask})
-			local nll       = -torch.cmul(labelmask,logprobs):sum()
-			NLL             = NLL + nll
-			local dLdlogp   = -labelmask
-			autoencoder:backward({X,labelmask},dLdlogp)
-			
-			local _, pred   = logprobs:max(2)
-			pred = pred:squeeze()
-			numCorrect      = numCorrect + torch.eq(pred,Y):sum()
-			numPredictions  = numPredictions + Y:nElement()
 
+			autoencoder:zeroGradParameters()
+			local nll = 0
+
+			-- since data is variable length, we do each sample individually
+			for b=1,opt.batchSize do
+				-- grab data
+				local index     = shuffle[t+b-1]
+				local X         = train.x[index]
+				local Y         = train.y[index]
+				local T         = Y:size(1)
+
+				-- labelmask is a one-hot encoding of y
+				local labelmask = torch.zeros(T,model.outputDepth):cuda():scatter(2,Y:view(T,1),1)
+
+				-- forward prop
+				local logprobs  = autoencoder:forward({X,labelmask})
+
+				-- nll keeps track of neg log likelihood of mini-batch
+				nll             = -torch.cmul(labelmask,logprobs):sum() + nll
+
+				-- NLL keeps track of neg log likelihood of entire dataset
+				NLL             = NLL + nll
+
+				-- backprop
+				local dLdlogp   = -labelmask
+				autoencoder:backward({X,labelmask},dLdlogp)
+
+				-- keep track of accuracy of predictions
+				local _, pred   = logprobs:max(2)
+				pred = pred:squeeze()
+				numCorrect      = numCorrect + torch.eq(pred,Y):sum()
+				numPredictions  = numPredictions + Y:nElement()
+			end
+
+			-- normalize according to size of mini-batch
+			nll = nll/opt.batchSize
+			gradients:div(opt.batchSize)
+
+			-- gradient clipping
 			local gradnorm  = gradients:norm()
 			table.insert(gradnorms,gradnorm)
 			if gradnorm > opt.maxnorm then
 				gradients:mul(opt.maxnorm/gradnorm)
 			end
-
+			
+			-- L2 regularization
 			if opt.weightDecay > 0 then
 				gradients:add(parameters*opt.weightDecay)
 			end
-			gradnoise.t = (gradnoise.t or 0) + 1
-			local sigma     = (gradnoise.eta/(1+gradnoise.t)^gradnoise.gamma)^0.5
-			gradients:add(torch.randn(gradients:size()):cuda()*sigma)
+
+			-- gradient noise
+			if gradnoise.eta ~= 0 then
+				gradnoise.t = (gradnoise.t or 0) + 1
+				local sigma     = (gradnoise.eta/(1+gradnoise.t)^gradnoise.gamma)^0.5
+				gradients:add(torch.randn(gradients:size()):cuda()*sigma)
+			end
+
 			return nll, gradients
 		end
 		optimMethod(optimfunc, parameters, optimConfig, optimState)
+		if opt.colnormconstr then
+			TrainUtils.columnNormConstraintGraph(autoencoder)
+		end
 		if t % 100 == 0 then
 			print('\ntrain gradnorm =', gradnorms[#gradnorms])
 			local accuracy = numCorrect/numPredictions
@@ -284,6 +318,7 @@ writeFile:close()
 
 numEpochs = opt.numEpochs or 100
 local trainLog, validLog
+local bestAccuracy = 0
 for epoch = 1, numEpochs do
 	print('---------- epoch ' .. epoch .. '----------')
 	print('optimConfig = ')
@@ -329,4 +364,8 @@ for epoch = 1, numEpochs do
 	writeFile:write('output',autoencoder.output:float())
 	writeFile:close()
 	torch.save(paths.concat(opt.savedir,'model.t7'),model)
+	if validAccuracy > bestAccuracy then
+		bestAccuracy = validAccuracy
+		torch.save(paths.concat(opt.savedir,'model_best.t7'),model)
+	end
 end
