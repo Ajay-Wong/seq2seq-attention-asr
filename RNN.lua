@@ -2,61 +2,60 @@ require 'nn'
 
 local RNN, parent = torch.class('nn.RNN','nn.Module')
 
-function RNN:__init(recurrent,T,reverse)
+function RNN:__init(recurrent,reverse)
 	parent.__init(self)
 
 	assert(recurrent ~= nil, "recurrent cannot be nil")
-	assert(T ~= nil, "length of sequence must be specified")
 	assert(recurrent.dimoutput ~= nil, "recurrent must specify dimoutput")
 
 	self.recurrent = recurrent
 	self.dimoutput = recurrent.dimoutput
-	self.T = T
+	self.T = 0
 	self.reverse = reverse or false
 
-	self.rnn = self:buildClones()
-	self:resetCloneParameters();
+	self.rnn = {}
 end
 
-function RNN:buildClones()
-	local clones = {}
-	local p,dp = self.recurrent:parameters()
-	if p == nil then
-		p = {}
-	end
-	local mem = torch.MemoryFile("w"):binary()
-	mem:writeObject(self.recurrent)
-	for t = 1, self.T do
-		local reader = torch.MemoryFile(mem:storage(), "r"):binary()
-		local clone = reader:readObject()
-		reader:close()
-		local cp,cdp = clone:parameters()
-		for i=1,#p do
-			cp[i]:set(p[i])
-			cdp[i]:set(dp[i])
-		end
-		clones[t] = clone
-		collectgarbage()
-	end
-	mem:close()
-	return clones
+function RNN:addClone()
+    local p,dp = self.recurrent:parameters()
+    if p == nil then
+        p = {}
+    end
+    local mem = torch.MemoryFile("w"):binary()
+    mem:writeObject(self.recurrent)
+    local reader = torch.MemoryFile(mem:storage(), "r"):binary()
+    local clone = reader:readObject()
+    reader:close()
+    local cp,cdp = clone:parameters()
+    for i=1,#p do
+        cp[i]:set(p[i])
+        cdp[i]:set(dp[i])
+    end
+    if not self.rnn then
+        self.rnn = {}
+    end
+    self.rnn[#self.rnn+1] = clone
+    collectgarbage()
+    mem:close()
+    self:resetCloneParameters()
 end
 
 function RNN:resetCloneParameters()
-	local p,dp = self.recurrent:parameters()
-	if p == nil then
-		p = {}
-	end
-	for t=1,self.T do
-		local cp,cdp = self.rnn[t]:parameters()
-		for i=1,#p do
-			cp[i]:set(p[i])
-			cdp[i]:set(dp[i])
-		end
-	end
-	collectgarbage()
-	return p,dp
+    local p,dp = self.recurrent:parameters()
+    if p == nil then
+        p = {}
+    end
+    for t=1,#self.rnn do
+        local cp,cdp = self.rnn[t]:parameters()
+        for i=1,#p do
+            cp[i]:set(p[i])
+            cdp[i]:set(dp[i])
+        end
+    end
+    collectgarbage()
+    return p,dp
 end
+
 
 function RNN:parameters()
 	return self:resetCloneParameters()
@@ -71,18 +70,21 @@ function RNN:getParameters()
 end
 
 function RNN:training()
+	self.recurrent:training()
 	for t=1,self.T do
 		self.rnn[t]:training()
 	end
 end
 
 function RNN:evaluate()
+	self.recurrent:evaluate()
 	for t=1,self.T do
 		self.rnn[t]:evaluate()
 	end
 end
 
 function RNN:float()
+	self.recurrent = self.recurrent:float()
 	for t=1,self.T do
 		self.clone[t] = self.clones[t]:float()
 	end
@@ -90,6 +92,7 @@ function RNN:float()
 end
 
 function RNN:double()
+	self.recurrent = self.recurrent:double()
 	for t=1,self.T do
 		self.clone[t] = self.clones[t]:double()
 	end
@@ -97,6 +100,7 @@ function RNN:double()
 end
 
 function RNN:cuda()
+	self.recurrent = self.recurrent:cuda()
 	for t=1,self.T do
 		self.clone[t] = self.clones[t]:cuda()
 	end
@@ -122,7 +126,7 @@ function RNN:updateOutput(input)
 		error('input dimension must be 2D or 3D')
 	end
 
-	assert(input:size(self.sequence_dim)==self.T, "sequence size of input must match self.T")
+	self.T = input:size(self.sequence_dim)
 	
 	local resetflag = not self.output
 					  or  self.output:nDimension()~=input:nDimension()
@@ -137,9 +141,22 @@ function RNN:updateOutput(input)
 	if self.reverse then
 		start,finish,step = self.T, 1, -1
 	end
+	if #self.rnn < self.T then
+		for t = 1,self.T,1 do
+			if not self.rnn[t] then
+				self:addClone()
+			end
+		end
+	end
 	for t = start,finish,step do
 		local x = input:select(self.sequence_dim,t)
-		y, h = unpack(self.rnn[t]:forward({x,y,h}))
+		local output = self.rnn[t]:forward({x,y,h})
+		if type(output) == 'table' then
+			y, h = unpack(output)
+		else
+			y = output
+			h = y
+		end
 		self.output:select(self.sequence_dim,t):copy(y)
 		self.h[t] = h
 	end

@@ -149,11 +149,11 @@ function RNNAttention:updateOutput(input)
 	if batchSize == 0 then
 		self.sequence_dim = 1
 		self.output:resize(T,self.dimoutput)
-		self.zeros_y:resize(self.dimoutput)
+		self.zeros_y:resize(self.dimoutput):zero()
 	else
 		self.sequence_dim = 2
 		self.output:resize(batchSize,T,self.dimoutput)
-		self.zeros_y:resize(batchSize,self.dimoutput)
+		self.zeros_y:resize(batchSize,self.dimoutput):zero()
 	end
 	
 	self.h = {}

@@ -3,12 +3,11 @@ require 'utils';
 
 local Recurrent, parent = torch.class('nn.Recurrent','nn.Module')
 
-function Recurrent:__init(recurrent,dimhidden,dimoutput)
+function Recurrent:__init(recurrent,dimhidden)
 	parent.__init(self)
 	
 	self.recurrent = recurrent
 	self.dimhidden = dimhidden
-	self.dimoutput = dimoutput
 
 	self.zeros_hidden = self:_recursiveOperation(dimhidden,function(x) return torch.zeros(x) end)	
 end
@@ -113,18 +112,24 @@ end
 
 function Recurrent:updateGradInput(input, gradOutput)
     local inp, prev_h = unpack(input) 
-    local dEdy,dEdh = unpack(gradOutput)
+    local dEdy,dEdh
+	if type(gradOutput) == 'table' then
+		dEdy,dEdh = unpack(gradOutput)
+    	dEdh = dEdh or self.zeros_hidden
+		gradOutput = {dEdy,dEdh}
+    	assert(prev_h ~= nil or dEdh ~= nil, "prev_h and dEdh cannot both be nil")
+	else
+		dEdy = gradOutput
+	end
 
-    assert(dEdy ~= nil, "dEdy should not be nil")
-    assert(prev_h ~= nil or dEdh ~= nil, "prev_c and dEdc cannot both be nil")
+    assert(dEdy ~= nil, "dEdy cannot be nil")
 
-	if #inp == 1 then
+	if type(inp) == 'table' and #inp == 1 then
 		inp = inp[1]
 	end
     prev_h = prev_h or self.zeros_hidden
-    dEdh = dEdh or self.zeros_hidden
 
-    local dEdx,dEdph = unpack(self.recurrent:backward({inp,prev_h},{dEdy,dEdh}))
+    local dEdx,dEdph = unpack(self.recurrent:backward({inp,prev_h},gradOutput))
     self.gradInput = {dEdx,dEdph}
     return self.gradInput
 end
