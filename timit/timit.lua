@@ -289,6 +289,7 @@ function Evaluate(data)
 	local numCorrect     = 0
 	local numPredictions = 0
 	local per            = torch.Tensor(numSamples)
+	local predlist       = {}
 	autoencoder:evaluate()
 	for t=1,numSamples do
 		xlua.progress(t,numSamples)
@@ -320,11 +321,12 @@ function Evaluate(data)
 			dist             = WagnerFischer(prediction,Y)
 		end
 		per[t]           = dist/T
+		predlist[index]  = prediction:clone()
 	end
 	local accuracy = numCorrect/numPredictions
 	NLL            = NLL/numSamples
 	local PER      = per:mean()
-	return accuracy, NLL, PER
+	return accuracy, NLL, PER, predlist
 end
 
 ------------------ Run ------------------
@@ -370,6 +372,7 @@ writeFile:close()
 numEpochs = opt.numEpochs or 100
 local trainLog, validLog
 local bestAccuracy = 0
+local bestPER      = 1e20
 for epoch = 1, numEpochs do
 	print('---------- epoch ' .. epoch .. '----------')
 	local start = sys.clock()
@@ -400,7 +403,7 @@ for epoch = 1, numEpochs do
 	local Vh_train    = decoder.Vh.output:float()
 	
 	local start = sys.clock()
-	local validAccuracy, validNLL, validPER = Evaluate(valid)
+	local validAccuracy, validNLL, validPER, predictions = Evaluate(valid)
 	print('\nvalidation time =', torch.round(10*(sys.clock()-start)/60)/10 .. ' minutes')
 	validLog = updateLog(validLog, validAccuracy, validNLL)
 	validLog.PER = updateList(validPER, validLog.PER)
@@ -425,9 +428,16 @@ for epoch = 1, numEpochs do
 	writeFile:write('output',autoencoder.output:float())
 	writeFile:close()
 	torch.save(paths.concat(opt.savedir,'model.t7'),model)
+	torch.save(paths.concat(opt.savedir,'predictions.t7'),predictions)
 	if validAccuracy > bestAccuracy then
 		bestAccuracy = validAccuracy
-		torch.save(paths.concat(opt.savedir,'model_best.t7'),model)
+		torch.save(paths.concat(opt.savedir,'model_best_valid_accuracy.t7'),model)
+		torch.save(paths.concat(opt.savedir,'predictions_best_valid_accuracy.t7'),predictions)
+	end
+	if validPER < bestPER then
+		bestPER = validPER
+		torch.save(paths.concat(opt.savedir,'model_best_valid_PER.t7'),model)
+		torch.save(paths.concat(opt.savedir,'predictions_best_valid_PER.t7'),predictions)
 	end
 	local time = math.floor((sys.clock() - start)/60)
 	print('\nepoch ' .. epoch .. ' completed in ' .. time .. ' minutes\n')
