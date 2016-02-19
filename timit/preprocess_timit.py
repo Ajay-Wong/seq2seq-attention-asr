@@ -22,11 +22,13 @@ savedir            = options.save
 rootdirtrain       = os.path.join(rootdir,'TRAIN')
 rootdirtest        = os.path.join(rootdir,'TEST')
 
+print '\n'
 print 'featuresSameLength = %s' % featuresSameLength
 print 'phonemesSameLength = %s' % phonemesSameLength
 print 'rootdir            = %s' % rootdir
 print 'savedir            = %s' % savedir
 print 'validIDs           = %s' % options.valid
+print '\n'
 
 os.system('mkdir -p %s' % savedir)
 
@@ -85,11 +87,14 @@ print 'parse phonemes & words'
 def parseFile(x,filetype):
     with open(os.path.join(x['root'],x[filetype])) as f:
         lines = f.read().split('\n')
-    return [l.split()[-1] for l in lines if len(l) > 0]
+    return zip(*[l.split() for l in lines if len(l) > 0])
 
 def parseAllFiles(files,filetype,keyname):
     for k,f in files.iteritems():
-        f[keyname] = parseFile(f,filetype)
+        start, finish, key = parseFile(f,filetype)
+        f[keyname] = list(key)
+        f['%s_start' % keyname] = start
+        f['%s_finish' % keyname] = finish
         
 def addEOStag(files):
     eos = '<EOS>'
@@ -155,12 +160,32 @@ for k,f in testfiles.iteritems():
 
 phonemes = {p:i+1 for i,p in enumerate(phonemesTrain)}
 
+with open('phones.60-48-39.map','r') as f:
+    kaldi_phonemes = f.readlines()
+kaldi_phonemes = [e.strip('\n').split('\t') for e in kaldi_phonemes]
+kaldi_phonemes.append(['<EOS>']*3)
+
+p60,p48,p39 = zip(*kaldi_phonemes)
+
+vocab48 = {p:i for i,p in enumerate(set(p48))}
+vocab39 = {p:i for i,p in enumerate(set(p39))}
+
+map48 = {k[0]:{'index':vocab48[k[1]],'phoneme':k[1]} for k in kaldi_phonemes}
+map39 = {k[0]:{'index':vocab39[k[2]],'phoneme':k[2]} for k in kaldi_phonemes}
+
+#------------------- save phoneme dictionary --------------------
+with open(os.path.join(savedir,'phonemes.txt'),'w') as f:
+    f.write('index60,phoneme60,index48,phoneme48,index39,phoneme39\n')
+    for k,v in sorted(list(phonemes.iteritems()),key = lambda x:x[1]):
+        f.write('%s,%s,%s,%s,%s,%s\n' % (v+1,k,map48[k]['index']+1,map48[k]['phoneme'],map39[k]['index']+1,map39[k]['phoneme']))
+
 #------------------- digitize phonemes --------------------
 print 'digitize phonemes'
 def digitizePhonemes(files):
     lengths = set()
     for k,f in files.iteritems():
         f['phonemeLabels'] = [phonemes[p] for p in f['phonemes']]
+        f['phonemeLabels39'] = [map39[p]['index'] for p in f['phonemes']]
         lengths.add(len(f['phonemeLabels']))
 
 digitizePhonemes(trainfiles)
@@ -333,6 +358,9 @@ def toHDF5(allfiles,filename):
                     mygrp      = grp.create_group(str(k))
                     mygrp['x'] = f['features']
                     mygrp['y'] = np.array(f['phonemeLabels'])
+                    mygrp['y39'] = np.array(f['phonemeLabels39'])
+                    mygrp['start'] = np.array(f['phonemes_start']).astype('int')
+                    mygrp['finish'] = np.array(f['phonemes_finish']).astype('int')
 
 #------------------- logmel features --------------------
 print 'generating logmel features'
