@@ -392,8 +392,8 @@ for epoch = 1, numEpochs do
 	print('')
 	local start = sys.clock()
 	local trainAccuracy, trainNLL, gradnorms = Train()
-	local time = 
-	print('\ntraining time   =', torch.round(10*(sys.clock()-start)/60)/10 .. ' minutes')
+	local trainTime = (sys.clock()-start)/60
+	print('\ntraining time   =', torch.round(trainTime) .. ' minutes')
 	trainLog = updateLog(trainLog, trainAccuracy, trainNLL, gradnorms)
 	print('train Accuracy  =', torch.round(100*100*trainAccuracy)/100 .. '%')
 	print('train NLL       =', torch.round(100*trainNLL)/100)
@@ -404,7 +404,10 @@ for epoch = 1, numEpochs do
 	
 	local start = sys.clock()
 	local validAccuracy, validNLL, validPER, predictions = Evaluate(valid)
-	print('\nvalidation time =', torch.round(10*(sys.clock()-start)/60)/10 .. ' minutes')
+	local validTime = (sys.clock() - start)/60
+	print('\nvalidation time =', torch.round(validTime) .. ' minutes')
+
+	local start = sys.clock()
 	validLog = updateLog(validLog, validAccuracy, validNLL)
 	validLog.PER = updateList(validPER, validLog.PER)
 	print('valid Accuracy  =', torch.round(100*100*validAccuracy)/100 .. '%')
@@ -439,6 +442,6 @@ for epoch = 1, numEpochs do
 		torch.save(paths.concat(opt.savedir,'model_best_valid_PER.t7'),model)
 		torch.save(paths.concat(opt.savedir,'predictions_best_valid_PER.t7'),predictions)
 	end
-	local time = math.floor((sys.clock() - start)/60)
-	print('\nepoch ' .. epoch .. ' completed in ' .. time .. ' minutes\n')
+	local totalTime = trainTime + validTime + (sys.clock() - start)/60
+	print('\nepoch ' .. epoch .. ' completed in ' .. torch.round(totalTime) .. ' minutes\n')
 end
