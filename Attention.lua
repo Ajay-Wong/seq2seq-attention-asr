@@ -323,8 +323,117 @@ function Attention:updateGradInput(input, gradOutput)
 	self.gradInput = self.decoder:backward(input, gradOutput)
 	return self.gradInput
 end
+
 		
 
+
+function Attention:BeamSearch(annotations,eos,K,maxseqlength)
+	assert(eos ~= nil, 'must specify eos index')
+	assert(type(eos) == 'number', 'eos index must be a number')
+	
+	local K = K or 5
+	local maxseqlength = maxseqlength or annotations:size(1)
+    local decoder = model.decoder
+
+	local deepcopy
+	deepcopy = function(x)
+		local y
+		if type(x) == 'table' then
+			y = {}
+			for k,v in pairs(x) do
+				y[k] = deepcopy(v)
+			end
+		else
+			y = x:clone()
+		end
+		return y
+	end 
+
+    local Vh = self.Vh
+    local vh = Vh:forward(annotations)
+
+    local decoder_base = self.decoder_base
+
+    local y_prev = decoder.rnn.zeros_y
+    local nonrecurrent = {vh,annotations}
+    local hidden = nil
+    local dec_base_inp = {{nonrecurrent,y_prev},hidden}
+
+    local L = annotations:size(1)
+    decoder_base.dimhidden = {L,decoder.stateDepth,decoder.stateDepth}
+    local output = decoder_base:forward(dec_base_inp)
+    local logprobs, hidden = unpack(output)
+
+    local N = logprobs:size(1)
+    local val, ind = torch.topk(logprobs:float(),K,1,true)
+    local p_beam = {}
+    local y_beam = {}
+    local h_beam = {}
+    local finished = 0
+    local y_finished = {}
+    local p_finished = {}
+    for k = 1,K do
+        if ind[k] == eos then
+            table.insert(y_finished,ind[{{k}}])
+            table.insert(p_finished,val[k])
+            finished = finished + 1
+        else
+            table.insert(y_beam, ind[{{k}}])
+            table.insert(h_beam, hidden)
+            table.insert(p_beam, val[k])
+        end
+    end
+
+    local count = 0
+    while finished < K and count < maxseqlength do
+        count = count + 1
+        local p_next = {}
+        local h_next = {}
+        for k = 1, K - finished do
+            y_prev = y_beam[k][y_beam[k]:size(1)]
+            h_prev = h_beam[k]
+            local labelmask = torch.zeros(model.outputDepth):cuda()
+            labelmask[y_prev] = 1
+
+            local hidden = deepcopy(h_prev)
+            local dec_base_inp = {{nonrecurrent,labelmask},hidden}
+            local output = decoder_base:forward(dec_base_inp)
+            p_next[k], h_next[k] = unpack(deepcopy(output))
+            p_next[k] = p_next[k] + p_beam[k]
+        end
+        local val, ind = torch.topk(nn.JoinTable(1):cuda():forward(p_next):float(),K,1,true)
+        local I = torch.floor((ind:double()-1)/N) + 1
+        local J = ind:double() - (I-1)*N
+
+        local y_beam_next = {}
+        local h_beam_next = {}
+        local p_beam_next = {}
+        for k = 1, K - finished do
+            local i = I[k]
+            local j = J[k]
+            local y_next = y_beam[i].new():resize(1):fill(j)
+            local y_next = torch.cat(y_beam[i],y_next)
+            if j == eos or count == maxseqlength then
+                table.insert(y_finished,y_next)
+                table.insert(p_finished,p_next[i][j])
+                finished = finished + 1
+            else
+                table.insert(y_beam_next,y_next)
+                table.insert(h_beam_next,h_next[i])
+                table.insert(p_beam_next,p_next[i][j])
+            end
+        end
+        y_beam = y_beam_next
+        h_beam = h_beam_next
+        p_beam = p_beam_next
+    end
+    --if count == maxseqlength then
+    --    print 'beam search reached max sequence length'
+    --end
+    local pval, best = torch.Tensor(p_finished):max(1)
+    local prediction = y_finished[best[1]]
+    return prediction
+end
 
 
 
