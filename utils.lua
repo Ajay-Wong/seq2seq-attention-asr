@@ -1,5 +1,31 @@
 require 'nngraph';
 
+function WagnerFischer(a,b)
+    assert(a:nDimension() == 1, 'a must be a 1D tensor')
+    assert(b:nDimension() == 1, 'b must be a 1D tensor')
+    m = a:size(1)+1
+    n = b:size(1)+1
+    d = torch.Tensor(m,n)
+    for i = 1, m do
+        d[{i,1}] = i-1
+    end
+    for j = 1, n do
+        d[{1,j}] = j-1
+    end
+    for j = 1, n-1 do
+        for i = 1, m-1 do
+            if a[i] == b[j] then
+                d[{i+1,j+1}] = d[{i,j}]
+            else
+                d[{i+1,j+1}] = math.min(d[{i,j+1}]+1,
+                                        d[{i+1,j}]+1,
+                                        d[{i,j}]+1)
+            end
+        end
+    end
+    return d[{m,n}]
+end
+
 function customToDot(graph, title, failedNode)
    local str = graph:todot(title)
    if not failedNode then
