@@ -34,7 +34,7 @@ opt.init_std        = 0.01
 opt.orthogonalize   = true
 
 -- load filepaths and metadata
-filepaths           = loadfilepath(opt.datadir)
+filepaths           = loadfilepaths(opt.datadir)
 meta                = loadmeta(opt.datadir)
 
 -- load model
