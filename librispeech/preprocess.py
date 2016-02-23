@@ -169,6 +169,16 @@ validfiles = organizeFiles(validdir)
 testfiles  = organizeFiles(testdir)
 charmap, wordmap = getCharMap([trainfiles,validfiles,testfiles])
 
+print 'save charmap and wordmap'
+with open(os.path.join(savedir,'charmap.txt'),'w') as f:
+    for k,v in sorted(list(charmap.iteritems()),key=lambda x:x[1]):
+        f.write('%s %s\n' % (k,v))
+
+with open(os.path.join(savedir,'wordmap.txt'),'w') as f:
+    for k,v in sorted(list(wordmap.iteritems()),key=lambda x:x[1]):
+        f.write('%s %s\n' % (k,v))
+
+
 print 'process transcriptions'
 processTranscriptions(trainfiles,charmap,wordmap)
 processTranscriptions(validfiles,charmap,wordmap)
