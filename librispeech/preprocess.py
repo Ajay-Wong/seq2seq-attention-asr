@@ -11,18 +11,36 @@ from optparse import OptionParser
 parser = OptionParser()
 parser.add_option('--root',help='root dir',dest='root',default='LibriSpeech')
 parser.add_option('--save',help='save directory',dest='save',default='LibriSpeech/preprocessed/')
-parser.add_option('--train',help='train directory',dest='train-clean-100',default='LibriSpeech/preprocessed/')
+parser.add_option('--train',help='train directory',dest='train',default='train-clean-100')
+parser.add_option('--nchunks',help='number of chunks to divide data into',dest='nchunks',default=40)
+parser.add_option('--script_test',help='sample limit for testing',dest='script_test',default=False)
+parser.add_option('--maxnumsamples',help='limit num samples',dest='maxnumsamples',default=1e20)
 (options, args) = parser.parse_args()
 
 rootdir         = options.root
 savedir         = options.save
-traindir        = os.path.join(rootdir,'train-clean-100')
+traindir        = os.path.join(rootdir,options.train)
 validdir        = os.path.join(rootdir,'dev-clean')
 testdir         = os.path.join(rootdir,'test-clean')
+nchunks         = int(options.nchunks)
+script_test     = options.script_test
+maxnumsamples   = int(options.maxnumsamples)
 
 print '\n'
-print 'rootdir     = %s' % rootdir
-print 'savedir     = %s' % savedir
+if script_test:
+    print 'run script test with 20 samples'
+    maxnumsamples = 20
+    nchunks       = 5
+    savedir       = 'preprocess_test'
+
+print 'rootdir       = %s' % rootdir
+print 'traindir      = %s' % traindir
+print 'validdir      = %s' % validdir
+print 'testdir       = %s' % testdir
+print 'savedir       = %s' % savedir
+print 'nchunks       = %s' % nchunks
+print 'maxnumsamples = %s' % maxnumsamples
+
 print '\n'
 
 os.system('mkdir -p %s' % savedir)
@@ -120,24 +138,24 @@ def CQT(filename, fmin=None, n_bins=84, hop_length=512,nfreqs=None):
 def getFeatures(files,func=logmel,**kwargs):
     for k,f in files.iteritems():
         filepath = f['audiofile']
-        f['features'] = func(filepath,**kwargs)
+        f['x'] = func(filepath,**kwargs)
 
 def normalizeFeatures(train,valid,test,pad=1):
     maxlength = 0
     featurelist = []
     for k,f in train.iteritems():
-        maxlength = max(maxlength,len(f['features']))
-        featurelist.append(f['features'])
+        maxlength = max(maxlength,len(f['x']))
+        featurelist.append(f['x'])
     featurelist = np.vstack(featurelist)
     mean = featurelist.mean(axis=0)
     std = featurelist.std(axis=0)
 
     def normalize_and_pad(files):
         for k,f in files.iteritems():
-            mylen = len(f['features'])
-            padding = np.zeros((pad,f['features'].shape[1]))
-            f['features'] = (f['features']-mean)/std
-            f['features'] = np.vstack([padding,f['features'],padding])
+            mylen = len(f['x'])
+            padding = np.zeros((pad,f['x'].shape[1]))
+            f['x'] = (f['x']-mean)/std
+            f['x'] = np.vstack([padding,f['x'],padding])
 
     normalize_and_pad(train)
     normalize_and_pad(valid)
@@ -149,18 +167,54 @@ def pickleIt(X,outputName):
     with open(outputName,'wb') as f:
         pickle.dump(X,f)
         
-def toHDF5(allfiles,filename):
+def files2HDF5(files,filename):
     with h5py.File(filename,'w') as h:
-        for g,files in allfiles.iteritems():
-            grp = h.create_group(g)
-            template = files[files.keys()[0]]
+        for i,f in enumerate(files.values()):
+            grp           = h.create_group(str(i))
+            grp['x']      = f['x']
+            grp['chars']  = f['chars']
+            grp['words']  = f['words']
 
-            for k,f in enumerate(files.values()):
-                mygrp           = grp.create_group(str(k))
-                mygrp['x']      = f['features']
-                mygrp['chars']  = np.array(f['chars'])
-                mygrp['words']  = np.array(f['words'])
+def dict2HDF5(dct,filename):
+    with h5py.File(filename,'w') as h:
+        for k,v in dct.iteritems():
+            if isinstance(v,np.ndarray):
+                h[k] = v
+            else:
+                print 'ignored %s' % k
 
+def chunks2HDF5(chunks,filepath,ext='.h5'):
+    db = []
+    n = len(chunks)
+    for i,chunk in enumerate(chunks):
+        myfilepath = '%s%s%s' % (filepath,i,ext)
+        db.append(myfilepath)
+        files2HDF5(chunk,myfilepath)
+    return db
+
+
+def chunkIt(files,nchunks=1):
+    nfiles = len(files)
+    chunksize = nfiles/nchunks + 1
+    count = 0
+    chunks = []
+    for k,v in files.iteritems():
+        if count % chunksize == 0:
+            chunk = {}
+            chunks.append(chunk)
+        chunk[k] = v
+        count += 1
+    return chunks
+        
+def savelist(lst,filepath):
+    with open(filepath,'w') as f:
+        for l in lst:
+            f.write('%s\n' % l)
+
+def savedict(dct,filepath):
+    with open(filepath,'w') as f:
+        for k,v in sorted(list(dct.iteritems()),key=lambda x:x[1]):
+            f.write('%s %s\n' % (k,v))
 
 #----------------- run -----------------------
 print 'organize files and generate maps'
@@ -169,15 +223,20 @@ validfiles = organizeFiles(validdir)
 testfiles  = organizeFiles(testdir)
 charmap, wordmap = getCharMap([trainfiles,validfiles,testfiles])
 
+# limit number of samples
+if len(trainfiles) > maxnumsamples:
+    trainfiles = {k:trainfiles[k] for k in trainfiles.keys()[:maxnumsamples]}
+    print '-reducing training set size to %s samples' % (len(trainfiles)) 
+if len(validfiles) > maxnumsamples:
+    validfiles = {k:validfiles[k] for k in validfiles.keys()[:maxnumsamples]}
+    print '-reducing validation set size to %s samples' % (len(validfiles)) 
+if len(testfiles) > maxnumsamples:
+    testfiles  = {k:testfiles[k]  for k in testfiles.keys()[:maxnumsamples]}
+    print '-reducing test set size to %s samples' % (len(testfiles)) 
+
 print 'save charmap and wordmap'
-with open(os.path.join(savedir,'charmap.txt'),'w') as f:
-    for k,v in sorted(list(charmap.iteritems()),key=lambda x:x[1]):
-        f.write('%s %s\n' % (k,v))
-
-with open(os.path.join(savedir,'wordmap.txt'),'w') as f:
-    for k,v in sorted(list(wordmap.iteritems()),key=lambda x:x[1]):
-        f.write('%s %s\n' % (k,v))
-
+savedict(charmap, os.path.join(savedir,'charmap.txt'))
+savedict(wordmap, os.path.join(savedir,'wordmap.txt'))
 
 print 'process transcriptions'
 processTranscriptions(trainfiles,charmap,wordmap)
@@ -193,15 +252,26 @@ getFeatures(testfiles,func=logmel,nfreqs=40)
 print 'normalize logmel features'
 logmel_mean, logmel_std = normalizeFeatures(trainfiles,validfiles,testfiles,pad=1)
 
-allfiles = {
-    'train' : trainfiles,
-    'valid' : validfiles,
-    'test'  : testfiles
-}
+print 'gather metadata'
+logmel_meta = {}
+logmel_meta['inputFrameSize'] = trainfiles.values()[0]['x'].shape[1]
+logmel_meta['trainsamples']   = len(trainfiles)
+logmel_meta['validsamples']   = len(validfiles)
+logmel_meta['testsamples']    = len(testfiles)
+logmel_meta['numchars']       = len(charmap)
+logmel_meta['numwords']       = len(wordmap)
 
 print 'save to disk'
-toHDF5(allfiles,os.path.join(savedir,'logmel.h5'))
-pickleIt([logmel_mean, logmel_std],os.path.join(savedir,'logmel_mean_std.pkl'))
+subdir = os.path.join(savedir,'logmel')
+os.system('mkdir -p %s' % subdir)
+trainChunked = chunkIt(trainfiles,nchunks)
+db_logmel = chunks2HDF5(trainChunked,os.path.join(subdir,'train'))
+savelist(db_logmel,os.path.join(subdir,'train.db'))
+files2HDF5(validfiles,os.path.join(subdir,'valid.h5'))
+files2HDF5(testfiles,os.path.join(subdir,'test.h5'))
+savedict(logmel_meta,os.path.join(subdir,'meta.txt'))
+dict2HDF5({'mean':logmel_mean,'std':logmel_std},os.path.join(subdir,'mean_std.pkl'))
+
 
 # CQT
 print 'generate CQT features'
@@ -212,12 +282,22 @@ getFeatures(testfiles,func=CQT)
 print 'normalize CQT features'
 CQT_mean, CQT_std = normalizeFeatures(trainfiles,validfiles,testfiles,pad=1)
 
-allfiles = {
-    'train' : trainfiles,
-    'valid' : validfiles,
-    'test'  : testfiles
-}
+print 'gather metadata'
+CQT_meta = {}
+CQT_meta['inputFrameSize'] = trainfiles.values()[0]['x'].shape[1]
+CQT_meta['trainsamples']   = len(trainfiles)
+CQT_meta['validsamples']   = len(validfiles)
+CQT_meta['testsamples']    = len(testfiles)
+CQT_meta['numchars']       = len(charmap)
+CQT_meta['numwords']       = len(wordmap)
 
 print 'save to disk'
-toHDF5(allfiles,os.path.join(savedir,'CQT.h5'))
-pickleIt([CQT_mean, CQT_std],os.path.join(savedir,'CQT_mean_std.pkl'))
+subdir = os.path.join(savedir,'CQT')
+os.system('mkdir -p %s' % subdir)
+trainChunked = chunkIt(trainfiles,nchunks)
+db_CQT = chunks2HDF5(trainChunked,os.path.join(subdir,'train'))
+savelist(db_CQT,os.path.join(subdir,'train.db'))
+files2HDF5(validfiles,os.path.join(subdir,'valid.h5'))
+files2HDF5(testfiles,os.path.join(subdir,'test.h5'))
+savedict(CQT_meta,os.path.join(subdir,'meta.txt'))
+dict2HDF5({'mean':CQT_mean,'std':CQT_std},os.path.join(subdir,'mean_std.pkl'))
