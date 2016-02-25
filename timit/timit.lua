@@ -27,6 +27,7 @@ opt.numPhonemes     = opt.numPhonemes    or 62
 opt.decode39        = opt.decode39       or true
 opt.predict39       = opt.predict39      or false
 opt.K               = opt.K              or 5 -- beam search width
+opt.normalizeNLL    = opt.normalizeNLL   or false
 print(opt)
 
 cutorch.setDevice(opt.device)
@@ -225,7 +226,11 @@ function Train()
 				local logprobs  = autoencoder:forward({X,labelmask})
 
 				-- nll keeps track of neg log likelihood of mini-batch
-				nll             = -torch.cmul(labelmask,logprobs):sum() + nll
+				if opt.normalizeNLL then
+					nll         = -torch.cmul(labelmask,logprobs):sum()/T + nll
+				else
+					nll         = -torch.cmul(labelmask,logprobs):sum() + nll
+				end
 
 				-- NLL keeps track of neg log likelihood of entire dataset
 				NLL             = NLL + nll
@@ -242,8 +247,10 @@ function Train()
 			end
 
 			-- normalize according to size of mini-batch
-			nll = nll/opt.batchSize
-			gradients:div(opt.batchSize)
+			if opt.batchSize > 1 then
+				nll = nll/opt.batchSize
+				gradients:div(opt.batchSize)
+			end
 
 			-- gradient clipping
 			local gradnorm  = gradients:norm()
@@ -357,22 +364,39 @@ function updateLog(log,accuracy,nll,gradnorms)
 	return log
 end
 	
-print('---------- evaluate initialization ----------')
-local validAccuracy, validNLL = Evaluate({numSamples=1,x={[1]=valid.x[1]},y={[1]=valid.y[1]}})
-print('valid Accuracy  =', torch.round(100*100*validAccuracy)/100 .. '%')
-print('valid NLL       =', torch.round(100*validNLL)/100)
-local alpha_valid = decoder:alpha():float()
-print('saving to ' .. opt.savedir)
+--print('---------- evaluate initialization ----------')
+--local validAccuracy, validNLL = Evaluate({numSamples=1,x={[1]=valid.x[1]},y={[1]=valid.y[1]}})
+--print('valid Accuracy  =', torch.round(100*100*validAccuracy)/100 .. '%')
+--print('valid NLL       =', torch.round(100*validNLL)/100)
+--local alpha_valid = decoder:alpha():float()
+--print('saving to ' .. opt.savedir)
 sys.execute('mkdir -p ' .. opt.savedir)
-local writeFile = hdf5.open(paths.concat(opt.savedir,'alpha0.h5'),'w')
-writeFile:write('alpha_valid',alpha_valid)
-writeFile:write('output',autoencoder.output:float())
-writeFile:close()
+--local writeFile = hdf5.open(paths.concat(opt.savedir,'alpha0.h5'),'w')
+--writeFile:write('alpha_valid',alpha_valid)
+--writeFile:write('output',autoencoder.output:float())
+--writeFile:close()
 
 numEpochs = opt.numEpochs or 100
 local trainLog, validLog
 local bestAccuracy = 0
 local bestPER      = 1e20
+
+if opt.resume then
+	local file = hdf5.open(paths.concat(opt.resumedir,'log.h5'),'r')
+	local data = file:all()
+	file:close()
+	trainLog   = data.train
+	validLog   = data.valid
+	bestAccuracy = validLog.accuracy:max()
+	bestPER      = validLog.PER:min()
+
+	print('resuming from....')
+	print(opt.resumedir)
+	print('best accuracy =',bestAccuracy)
+	print('best PER =',bestPER)
+end
+
+
 for epoch = 1, numEpochs do
 	print('---------- epoch ' .. epoch .. '----------')
 	local start = sys.clock()
