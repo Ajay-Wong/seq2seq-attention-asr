@@ -19,6 +19,7 @@ opt.savedir         = opt.savedir        or 'LibriSpeech/output/CQT'
 opt.batchSize       = opt.batchSize      or 1
 opt.numEpochs       = opt.numEpochs      or 100
 opt.maxnorm         = opt.maxnorm        or 1
+opt.normalizeNLL    = opt.normalizeNLL   or false
 opt.weightDecay     = opt.weightDecay    or 1e-4
 opt.colnormconstr   = opt.colnormconstr  or false -- column norm constraint
 opt.weightnoise     = opt.weightnoise    or 0
@@ -124,7 +125,11 @@ function Train()
 					local logprobs  = autoencoder:forward({X,labelmask})
 
 					-- nll keeps track of neg log likelihood of mini-batch
-					nll             = -torch.cmul(labelmask,logprobs):sum() + nll
+					if opt.normalizeNLL then
+						nll         = -torch.cmul(labelmask,logprobs):sum()/T + nll
+					else
+						nll         = -torch.cmul(labelmask,logprobs):sum() + nll
+					end
 
 					-- NLL keeps track of neg log likelihood of entire dataset
 					NLL             = NLL + nll

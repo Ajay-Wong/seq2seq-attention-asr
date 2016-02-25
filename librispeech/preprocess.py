@@ -15,6 +15,8 @@ parser.add_option('--train',help='train directory',dest='train',default='train-c
 parser.add_option('--nchunks',help='number of chunks to divide data into',dest='nchunks',default=40)
 parser.add_option('--script_test',help='sample limit for testing',dest='script_test',default=False)
 parser.add_option('--maxnumsamples',help='limit num samples',dest='maxnumsamples',default=1e20)
+parser.add_option('--no_logmel',help='turn off logmel',dest='no_logmel',default=False)
+parser.add_option('--no_cqt',help='turn off cqt',dest='no_cqt',default=False)
 (options, args) = parser.parse_args()
 
 rootdir         = options.root
@@ -25,6 +27,8 @@ testdir         = os.path.join(rootdir,'test-clean')
 nchunks         = int(options.nchunks)
 script_test     = options.script_test
 maxnumsamples   = int(options.maxnumsamples)
+no_logmel       = options.no_logmel
+no_cqt          = options.no_cqt
 
 print '\n'
 if script_test:
@@ -244,60 +248,62 @@ processTranscriptions(validfiles,charmap,wordmap)
 processTranscriptions(testfiles,charmap,wordmap)
 
 # logmel
-print 'generate logmel features'
-getFeatures(trainfiles,func=logmel,nfreqs=40)
-getFeatures(validfiles,func=logmel,nfreqs=40)
-getFeatures(testfiles,func=logmel,nfreqs=40)
+if no_logmel == False:
+    print 'generate logmel features'
+    getFeatures(trainfiles,func=logmel,nfreqs=40)
+    getFeatures(validfiles,func=logmel,nfreqs=40)
+    getFeatures(testfiles,func=logmel,nfreqs=40)
 
-print 'normalize logmel features'
-logmel_mean, logmel_std = normalizeFeatures(trainfiles,validfiles,testfiles,pad=1)
+    print 'normalize logmel features'
+    logmel_mean, logmel_std = normalizeFeatures(trainfiles,validfiles,testfiles,pad=1)
 
-print 'gather metadata'
-logmel_meta = {}
-logmel_meta['inputFrameSize'] = trainfiles.values()[0]['x'].shape[1]
-logmel_meta['trainsamples']   = len(trainfiles)
-logmel_meta['validsamples']   = len(validfiles)
-logmel_meta['testsamples']    = len(testfiles)
-logmel_meta['numchars']       = len(charmap)
-logmel_meta['numwords']       = len(wordmap)
+    print 'gather metadata'
+    logmel_meta = {}
+    logmel_meta['inputFrameSize'] = trainfiles.values()[0]['x'].shape[1]
+    logmel_meta['trainsamples']   = len(trainfiles)
+    logmel_meta['validsamples']   = len(validfiles)
+    logmel_meta['testsamples']    = len(testfiles)
+    logmel_meta['numchars']       = len(charmap)
+    logmel_meta['numwords']       = len(wordmap)
 
-print 'save to disk'
-subdir = os.path.join(savedir,'logmel')
-os.system('mkdir -p %s' % subdir)
-trainChunked = chunkIt(trainfiles,nchunks)
-db_logmel = chunks2HDF5(trainChunked,os.path.join(subdir,'train'))
-savelist(db_logmel,os.path.join(subdir,'train.db'))
-files2HDF5(validfiles,os.path.join(subdir,'valid.h5'))
-files2HDF5(testfiles,os.path.join(subdir,'test.h5'))
-savedict(logmel_meta,os.path.join(subdir,'meta.txt'))
-dict2HDF5({'mean':logmel_mean,'std':logmel_std},os.path.join(subdir,'mean_std.pkl'))
+    print 'save to disk'
+    subdir = os.path.join(savedir,'logmel')
+    os.system('mkdir -p %s' % subdir)
+    trainChunked = chunkIt(trainfiles,nchunks)
+    db_logmel = chunks2HDF5(trainChunked,os.path.join(subdir,'train'))
+    savelist(db_logmel,os.path.join(subdir,'train.db'))
+    files2HDF5(validfiles,os.path.join(subdir,'valid.h5'))
+    files2HDF5(testfiles,os.path.join(subdir,'test.h5'))
+    savedict(logmel_meta,os.path.join(subdir,'meta.txt'))
+    dict2HDF5({'mean':logmel_mean,'std':logmel_std},os.path.join(subdir,'mean_std.pkl'))
 
 
 # CQT
-print 'generate CQT features'
-getFeatures(trainfiles,func=CQT)
-getFeatures(validfiles,func=CQT)
-getFeatures(testfiles,func=CQT)
+if no_cqt == False:
+    print 'generate CQT features'
+    getFeatures(trainfiles,func=CQT)
+    getFeatures(validfiles,func=CQT)
+    getFeatures(testfiles,func=CQT)
 
-print 'normalize CQT features'
-CQT_mean, CQT_std = normalizeFeatures(trainfiles,validfiles,testfiles,pad=1)
+    print 'normalize CQT features'
+    CQT_mean, CQT_std = normalizeFeatures(trainfiles,validfiles,testfiles,pad=1)
 
-print 'gather metadata'
-CQT_meta = {}
-CQT_meta['inputFrameSize'] = trainfiles.values()[0]['x'].shape[1]
-CQT_meta['trainsamples']   = len(trainfiles)
-CQT_meta['validsamples']   = len(validfiles)
-CQT_meta['testsamples']    = len(testfiles)
-CQT_meta['numchars']       = len(charmap)
-CQT_meta['numwords']       = len(wordmap)
+    print 'gather metadata'
+    CQT_meta = {}
+    CQT_meta['inputFrameSize'] = trainfiles.values()[0]['x'].shape[1]
+    CQT_meta['trainsamples']   = len(trainfiles)
+    CQT_meta['validsamples']   = len(validfiles)
+    CQT_meta['testsamples']    = len(testfiles)
+    CQT_meta['numchars']       = len(charmap)
+    CQT_meta['numwords']       = len(wordmap)
 
-print 'save to disk'
-subdir = os.path.join(savedir,'CQT')
-os.system('mkdir -p %s' % subdir)
-trainChunked = chunkIt(trainfiles,nchunks)
-db_CQT = chunks2HDF5(trainChunked,os.path.join(subdir,'train'))
-savelist(db_CQT,os.path.join(subdir,'train.db'))
-files2HDF5(validfiles,os.path.join(subdir,'valid.h5'))
-files2HDF5(testfiles,os.path.join(subdir,'test.h5'))
-savedict(CQT_meta,os.path.join(subdir,'meta.txt'))
-dict2HDF5({'mean':CQT_mean,'std':CQT_std},os.path.join(subdir,'mean_std.pkl'))
+    print 'save to disk'
+    subdir = os.path.join(savedir,'CQT')
+    os.system('mkdir -p %s' % subdir)
+    trainChunked = chunkIt(trainfiles,nchunks)
+    db_CQT = chunks2HDF5(trainChunked,os.path.join(subdir,'train'))
+    savelist(db_CQT,os.path.join(subdir,'train.db'))
+    files2HDF5(validfiles,os.path.join(subdir,'valid.h5'))
+    files2HDF5(testfiles,os.path.join(subdir,'test.h5'))
+    savedict(CQT_meta,os.path.join(subdir,'meta.txt'))
+    dict2HDF5({'mean':CQT_mean,'std':CQT_std},os.path.join(subdir,'mean_std.pkl'))
