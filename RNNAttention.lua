@@ -172,6 +172,7 @@ function RNNAttention:updateOutput(input)
 			prev_y = y:select(self.sequence_dim,t-step)
 		end
 		local x = {nonrecurrent, prev_y}
+		--print({x,h})
 		next_y, h = unpack(self.rnn[t]:forward({x,h}))
 		self.output:select(self.sequence_dim,t):copy(next_y)
 		self.h[t] = h
