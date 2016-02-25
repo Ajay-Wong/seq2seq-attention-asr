@@ -6,6 +6,7 @@ function loadfilepaths(datadir)
 	for line in traindb:lines() do
 		table.insert(chunks,line)
 	end
+	traindb:close()
 	local valid = paths.concat(datadir,'valid.h5')
 	local test = paths.concat(datadir,'test.h5')
 	local filepaths = {}
