@@ -181,9 +181,11 @@ function Train()
 			end
 
 			-- report useful stats
-			print('\ntrain gradnorm =', gradnorms[#gradnorms])
-			local accuracy = numCorrect/numPredictions
-			print('train accuracy =',torch.round(100*100*accuracy)/100 .. '%')
+			if t % 2000 then
+				print('\ntrain gradnorm =', gradnorms[#gradnorms])
+				local accuracy = numCorrect/numPredictions
+				print('train accuracy =',torch.round(100*100*accuracy)/100 .. '%')
+			end
 		end
 	end
 
