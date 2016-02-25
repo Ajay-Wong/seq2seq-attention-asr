@@ -23,14 +23,13 @@ function MonotonicAlignment:updateOutput(input)
 
 	if alpha:nDimension() == 1 then
 		-- non-batch mode
-		assert(alpha:size(1) == prev_alpha:size(1), 'alpha and prev_alpha must be the same size')
+		assert(alpha:size(1) == prev_alpha:size(1), 'alpha ' .. alpha:size(1) .. ' and prev_alpha ' .. prev_alpha:size(1)  ..' must be the same size')
 		self.cumsum_alpha:cumsum(alpha)
 		self.cumsum_prev:cumsum(prev_alpha)
 		self.penalty:cmax(torch.sum(self.cumsum_alpha-self.cumsum_prev,1),0)
 	elseif alpha:nDimension() == 2 then
 		-- batch mode
-		assert(alpha:size(1) == prev_alpha:size(1), 'alpha and prev_alpha must be the same size')
-		assert(alpha:size(2) == prev_alpha:size(2), 'alpha and prev_alpha must be the same size')
+		assert(alpha:size(1) == prev_alpha:size(1), 'alpha ' .. alpha:size(1) .. ' and prev_alpha ' .. prev_alpha:size(1)  ..' must be the same size')
 		self.cumsum_alpha:cumsum(alpha,2)
 		self.cumsum_prev:cumsum(prev_alpha,2)
 		self.penalty:cmax(torch.sum(self.cumsum_alpha-self.cumsum_prev,2),0)
