@@ -106,6 +106,17 @@ function Recurrent:updateOutput(input)
 
     prev_h = prev_h or self.zeros_hidden
 
+	--[[
+	print('recurrent inputs')
+	print({inp,prev_h})
+	print('inp')
+	print(inp)
+	print('prev_h')
+	print(prev_h)
+	print(prev_h[1])
+	print(prev_h[2])
+	print(prev_h[3])
+	]]
     self.output = self.recurrent:forward({inp,prev_h})
     return self.output
 end
