@@ -87,8 +87,7 @@ if model then
 	optimConfig = model.optimConfig
 	optimState  = model.optimState
 	gradnoise   = model.gradnoise
-	--model.outputDepth = model.outputDepth or opt.numPhonemes
-
+	AWN         = model.AWN
 
 	model.opt = opt
 else
@@ -189,7 +188,13 @@ if opt.weightnoise > 0 then
 	weightnoise = torch.randn(parameters:size()):cuda()
 end
 if opt.adaweightnoise then
-	AWN = nn.AdaptiveWeightNoise(parameters:clone(),opt.lambda):cuda()
+	print('initializing adaptive weight noise, lambda =',opt.adalambda)
+	if AWN then
+		AWN.lambda = opt.adalambda
+	else
+		AWN = nn.AdaptiveWeightNoise(parameters:clone(),opt.adalambda):cuda()
+		model.AWN = AWN
+	end
 	adaparameters,adagradients = AWN:getParameters()
 end
 function Train()
@@ -204,8 +209,14 @@ function Train()
 		collectgarbage()
 		xlua.progress(t+opt.batchSize-1,numSamples)
 		local optimfunc = function(x)
-			if x ~= parameters then
-				parameters:copy(x)
+			if opt.adaweightnoise then
+				if x ~= adaparameters then
+					adaparameters:copy(x)
+				end
+			else
+				if x ~= parameters then
+					parameters:copy(x)
+				end
 			end
 
 			autoencoder:zeroGradParameters()
@@ -325,6 +336,9 @@ function Evaluate(data)
 	local numPredictions = 0
 	local per            = torch.Tensor(numSamples)
 	local predlist       = {}
+	if opt.adaweightnoise then
+		parameters:copy(AWN:Mode())
+	end
 	autoencoder:evaluate()
 	for t=1,numSamples do
 		xlua.progress(t,numSamples)
