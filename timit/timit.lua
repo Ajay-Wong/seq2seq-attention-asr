@@ -10,6 +10,7 @@ require 'optim';
 require 'cunn';
 require 'utils';
 require 'utils_timit';
+require 'AdaptiveWeightNoise';
 TrainUtils = require 'TrainUtils'
 
 opt                 = opt                or {}
@@ -28,6 +29,8 @@ opt.decode39        = opt.decode39       or true
 opt.predict39       = opt.predict39      or false
 opt.K               = opt.K              or 5 -- beam search width
 opt.normalizeNLL    = opt.normalizeNLL   or false
+opt.adaweightnoise  = opt.adaweightnoise or true
+opt.adalambda       = opt.adalambda      or 1.0 -- complexity multiplier for adaptive weight noise
 print(opt)
 
 cutorch.setDevice(opt.device)
@@ -185,6 +188,10 @@ gradnoise   = gradnoise or {
 if opt.weightnoise > 0 then
 	weightnoise = torch.randn(parameters:size()):cuda()
 end
+if opt.adaweightnoise then
+	AWN = nn.AdaptiveWeightNoise(parameters:clone(),opt.lambda):cuda()
+	adaparameters,adagradients = AWN:getParameters()
+end
 function Train()
 	local numSamples     = math.min(opt.maxnumsamples,train.numSamples)
 	local shuffle        = torch.randperm(numSamples):long()
@@ -211,6 +218,11 @@ function Train()
 				if opt.weightnoise > 0 then
 					weightnoise:randn(parameters:size()):mul(opt.weightnoise)
 					parameters:add(weightnoise)
+				end
+
+				-- adaptive weight noise
+				if opt.adaweightnoise then
+					parameters:copy(AWN:Sample())
 				end
 
 				-- grab data
@@ -272,9 +284,25 @@ function Train()
 				gradients:add(torch.randn(gradients:size()):cuda()*sigma)
 			end
 
-			return nll, gradients
+			-- adaptive weight noise
+			if opt.adaweightnoise then
+				AWN:zeroGradParameters()
+				local L = AWN:forward(nll)
+				AWN:backward(nll,gradients)
+				return L, adagradients
+			else
+				return nll, gradients
+			end
 		end
-		optimMethod(optimfunc, parameters, optimConfig, optimState)
+
+		-- optimization step
+		if opt.adaweightnoise then
+			optimMethod(optimfunc, adaparameters, optimConfig, optimState)
+		else
+			optimMethod(optimfunc, parameters, optimConfig, optimState)
+		end
+
+		-- column norm constraints
 		if opt.colnormconstr then
 			TrainUtils.columnNormConstraintGraph(autoencoder)
 		end
