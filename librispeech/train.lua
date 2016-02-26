@@ -91,8 +91,8 @@ function Train()
 	-- load each chunk separately
 	for k = 1, #filepaths.train do 
 		currentChunk         = shuffleChunks[k]
-		local filepath       = filepaths[shuffleChunks[k]]
-		local train          = loaddata(filepaths,opt.labelset)
+		local filepath       = filepaths.train[shuffleChunks[k]]
+		local train          = loaddata(filepath,opt.labelset)
 		local numSamples     = train.numSamples
 		local shuffle        = torch.randperm(numSamples):long()
 		for t=1,numSamples,opt.batchSize do
