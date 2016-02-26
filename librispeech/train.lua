@@ -74,6 +74,9 @@ gradnoise   = gradnoise or {
 if opt.weightnoise > 0 then
 	weightnoise = torch.randn(parameters:size()):cuda()
 end
+
+currentChunk = 0
+currentIndex = 0
 function Train()
 	local numChunks       = #filepaths.train
 	local totalNumSamples = meta.trainsamples
@@ -86,8 +89,10 @@ function Train()
 	autoencoder:training()
 
 	-- load each chunk separately
-	for _,fpath in pairs(filepaths.train) do
-		local train          = loaddata(fpath,opt.labelset)
+	for k = 1, #filepaths.train do 
+		currentChunk         = shuffleChunks[k]
+		local filepath       = filepaths[shuffleChunks[k]]
+		local train          = loaddata(filepaths,opt.labelset)
 		local numSamples     = train.numSamples
 		local shuffle        = torch.randperm(numSamples):long()
 		for t=1,numSamples,opt.batchSize do
@@ -117,6 +122,7 @@ function Train()
 					local X         = train.x[index]
 					local Y         = train.y[index]
 					local T         = Y:size(1)
+					currentIndex    = index
 
 					-- labelmask is a one-hot encoding of y
 					local labelmask = torch.zeros(T,model.outputDepth):cuda():scatter(2,Y:view(T,1),1)
@@ -181,7 +187,7 @@ function Train()
 			end
 
 			-- report useful stats
-			if t % 2000 then
+			if t % 2000 == 0 then
 				print('\ntrain gradnorm =', gradnorms[#gradnorms])
 				local accuracy = numCorrect/numPredictions
 				print('train accuracy =',torch.round(100*100*accuracy)/100 .. '%')
