@@ -77,6 +77,8 @@ end
 
 currentChunk = 0
 currentIndex = 0
+L_list = {}
+T_list = {}
 function Train()
 	local numChunks       = #filepaths.train
 	local totalNumSamples = meta.trainsamples
@@ -87,6 +89,9 @@ function Train()
 	local gradnorms       = {}
 	local sampleCount     = 0
 	autoencoder:training()
+
+	L_list = {}
+	T_list = {}
 
 	-- load each chunk separately
 	for k = 1, #filepaths.train do 
@@ -119,10 +124,13 @@ function Train()
 
 					-- grab data
 					local index     = shuffle[t+b-1]
-					local X         = train.x[index]
-					local Y         = train.y[index]
+					local X         = train.x[index]:cuda()
+					local Y         = train.y[index]:cuda()
 					local T         = Y:size(1)
 					currentIndex    = index
+
+					table.insert(L_list,X:size(1))
+					table.insert(T_list,T)
 
 					-- labelmask is a one-hot encoding of y
 					local labelmask = torch.zeros(T,model.outputDepth):cuda():scatter(2,Y:view(T,1),1)
@@ -187,10 +195,21 @@ function Train()
 			end
 
 			-- report useful stats
-			if t % 2000 == 0 then
+			if t % 500 == 0 then
 				print('\ntrain gradnorm =', gradnorms[#gradnorms])
+				print('||parameters||',parameters:norm())
 				local accuracy = numCorrect/numPredictions
 				print('train accuracy =',torch.round(100*100*accuracy)/100 .. '%')
+				--local LL = torch.Tensor(L_list)
+				--local TT = torch.Tensor(T_list)
+				--print('avg L =',LL:mean())
+				--print('max L =',LL:max())
+				--print('avg T =',TT:mean())
+				--print('max T =',TT:max())
+				--local ratio = torch.cdiv(LL,TT)
+				--print('min L/T =',ratio:min())
+				--print('avg L/T =',ratio:mean())
+				--print('max L/T =',ratio:max())
 			end
 		end
 	end
@@ -213,8 +232,8 @@ function Evaluate(filepath)
 	for t=1,numSamples do
 		xlua.progress(t,numSamples)
 		local index      = t
-		local X          = data.x[index]
-		local Y          = data.y[index]
+		local X          = data.x[index]:cuda()
+		local Y          = data.y[index]:cuda()
 		local T          = Y:size(1)
 		local labelmask  = torch.zeros(T,model.outputDepth):cuda():scatter(2,Y:view(T,1),1)
 		local logprobs   = autoencoder:forward({X,labelmask})
