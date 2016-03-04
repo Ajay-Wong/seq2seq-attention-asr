@@ -11,6 +11,7 @@ require 'cunn';
 require 'utils';
 require 'utils_timit';
 require 'AdaptiveWeightNoise';
+require 'WeightNoise';
 TrainUtils = require 'TrainUtils'
 
 opt                 = opt                or {}
@@ -29,8 +30,10 @@ opt.decode39        = opt.decode39       or true
 opt.predict39       = opt.predict39      or false
 opt.K               = opt.K              or 5 -- beam search width
 opt.normalizeNLL    = opt.normalizeNLL   or false
-opt.adaweightnoise  = opt.adaweightnoise or true
+opt.normalizeGrad   = opt.normalizeGrad  or false
+opt.adaweightnoise  = opt.adaweightnoise or false
 opt.adalambda       = opt.adalambda      or 1.0 -- complexity multiplier for adaptive weight noise
+opt.adasigmainit    = opt.adasigmainit   or 0.075
 print(opt)
 
 cutorch.setDevice(opt.device)
@@ -185,14 +188,17 @@ gradnoise   = gradnoise or {
 	t     = 0
 }
 if opt.weightnoise > 0 then
-	weightnoise = torch.randn(parameters:size()):cuda()
+	print('initializing weight noise,','sigma =',opt.weightnoise)
+	WeightNoise = nn.WeightNoise(parameters,opt.weightnoise):cuda()
+	model.WeightNoise = WeightNoise
+	wnparameters, wngradients = WeightNoise:getParameters()
 end
 if opt.adaweightnoise then
-	print('initializing adaptive weight noise, lambda =',opt.adalambda)
+	print('initializing adaptive weight noise,','lambda =',opt.adalambda,'init std =',opt.adasigmainit)
 	if AWN then
 		AWN.lambda = opt.adalambda
 	else
-		AWN = nn.AdaptiveWeightNoise(parameters:clone(),opt.adalambda):cuda()
+		AWN = nn.AdaptiveWeightNoise(parameters:clone(),opt.adalambda,opt.adasigmainit):cuda()
 		model.AWN = AWN
 	end
 	adaparameters,adagradients = AWN:getParameters()
@@ -204,6 +210,7 @@ function Train()
 	local numCorrect     = 0
 	local numPredictions = 0
 	local gradnorms      = {}
+	local L_bound        = 0
 	autoencoder:training()
 	for t=1,numSamples,opt.batchSize do
 		collectgarbage()
@@ -213,6 +220,10 @@ function Train()
 				if x ~= adaparameters then
 					adaparameters:copy(x)
 				end
+			elseif opt.weightnoise > 0 then
+				if x ~= wnparameters then
+					wnparameters:copy(x)
+				end
 			else
 				if x ~= parameters then
 					parameters:copy(x)
@@ -221,19 +232,24 @@ function Train()
 
 			autoencoder:zeroGradParameters()
 			local nll = 0
+			if opt.weightnoise > 0 then
+				WeightNoise:zeroGradParameters()
+			end
 
 			-- since data is variable length, we do each sample individually
 			for b=1,opt.batchSize do
 
 				-- weight noise
 				if opt.weightnoise > 0 then
-					weightnoise:randn(parameters:size()):mul(opt.weightnoise)
-					parameters:add(weightnoise)
+					parameters:copy(WeightNoise:Sample())
 				end
 
 				-- adaptive weight noise
 				if opt.adaweightnoise then
+					--print('\nparameters:mean()',parameters:mean())
+					--print('parameters:norm()',parameters:norm())
 					parameters:copy(AWN:Sample())
+					--print('parameters:norm()',parameters:norm())
 				end
 
 				-- grab data
@@ -260,6 +276,9 @@ function Train()
 
 				-- backprop
 				local dLdlogp   = -labelmask
+				if opt.normalizeGrad then
+					dLdlogp     = dLdlogp/T
+				end
 				autoencoder:backward({X,labelmask},dLdlogp)
 
 				-- keep track of accuracy of predictions
@@ -295,10 +314,18 @@ function Train()
 				gradients:add(torch.randn(gradients:size()):cuda()*sigma)
 			end
 
+			-- weight noise
+			if opt.weightnoise > 0 then
+				WeightNoise:forward(nll);
+				WeightNoise:backward(nll,gradients)
+				return nll, wngradients
+			end
+
 			-- adaptive weight noise
 			if opt.adaweightnoise then
 				AWN:zeroGradParameters()
 				local L = AWN:forward(nll)
+				L_bound = L_bound + L
 				AWN:backward(nll,gradients)
 				return L, adagradients
 			else
@@ -309,6 +336,8 @@ function Train()
 		-- optimization step
 		if opt.adaweightnoise then
 			optimMethod(optimfunc, adaparameters, optimConfig, optimState)
+		elseif opt.weightnoise > 0 then
+			optimMethod(optimfunc, wnparameters, optimConfig, optimState)
 		else
 			optimMethod(optimfunc, parameters, optimConfig, optimState)
 		end
@@ -317,10 +346,15 @@ function Train()
 		if opt.colnormconstr then
 			TrainUtils.columnNormConstraintGraph(autoencoder)
 		end
-		if t % 500 == 0 then
+		if t % 10 == 0 then
 			print('\ntrain gradnorm =', gradnorms[#gradnorms])
 			local accuracy = numCorrect/numPredictions
 			print('train accuracy =',torch.round(100*100*accuracy)/100 .. '%')
+			if opt.adaweightnoise then
+				print('train L =',L_bound/t)
+			else
+				print('train nll =',NLL/t)
+			end
 		end
 	end
 	local accuracy = numCorrect/numPredictions
@@ -338,6 +372,8 @@ function Evaluate(data)
 	local predlist       = {}
 	if opt.adaweightnoise then
 		parameters:copy(AWN:Mode())
+	elseif opt.weightnoise > 0 then
+		parameters:copy(WeightNoise:Mode())
 	end
 	autoencoder:evaluate()
 	for t=1,numSamples do
@@ -423,6 +459,11 @@ local trainLog, validLog
 local bestAccuracy = 0
 local bestPER      = 1e20
 
+function formatPercent(val,d)
+	local d = d or 2
+	return torch.round(10^2*val)/(10^2)
+end
+
 if opt.resume then
 	local file = hdf5.open(paths.concat(opt.resumedir,'log.h5'),'r')
 	local data = file:all()
@@ -434,8 +475,16 @@ if opt.resume then
 
 	print('resuming from....')
 	print(opt.resumedir)
-	print('best accuracy =',bestAccuracy)
-	print('best PER =',bestPER)
+	print('best accuracy =',formatPercent(bestAccuracy))
+	print('best PER =',formatPercent(bestPER))
+
+	local start = sys.clock()
+	--local validAccuracy, validNLL, validPER, predictions = Evaluate(valid)
+	local validTime = (sys.clock() - start)/60
+	--print('\nvalidation time =', torch.round(validTime) .. ' minutes')
+	--print('valid Accuracy  =', torch.round(100*100*validAccuracy)/100 .. '%')
+	--print('valid NLL       =', torch.round(100*validNLL)/100)
+	--print('valid PER       =', torch.round(100*100*validPER)/100 .. '%')
 end
 
 
@@ -449,6 +498,7 @@ for epoch = 1, numEpochs do
 			end
 		end
 	end
+	print('device =',opt.device)
 	print('optimConfig = ')
 	print(optimConfig)
 	print('optimState  = ')
