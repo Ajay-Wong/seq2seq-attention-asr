@@ -17,7 +17,9 @@ function Maxout:__init(inputDimension,outputDimension,window)
 	maxout:add(nn.TemporalMaxPooling(self.window,self.window))
 	maxout:add(nn.View(self.outputDim))
 	self.maxout = maxout	
+	self.modules = {maxout}
 end 
+
 
 function Maxout:parameters()
 	return self.maxout:parameters()

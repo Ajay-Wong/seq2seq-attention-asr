@@ -7,9 +7,14 @@ function Recurrent:__init(recurrent,dimhidden)
 	parent.__init(self)
 	
 	self.recurrent = recurrent
+	self.modules = {recurrent}
 	self.dimhidden = dimhidden
 
 	self.zeros_hidden = self:_recursiveOperation(dimhidden,function(x) return torch.zeros(x) end)	
+end
+
+function Recurrent:modules()
+	return self.recurrent
 end
 
 function Recurrent:parameters()

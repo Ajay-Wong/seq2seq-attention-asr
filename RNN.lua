@@ -14,7 +14,9 @@ function RNN:__init(recurrent,reverse)
 	self.reverse = reverse or false
 
 	self.rnn = {}
+	self.modules = {self.recurrent}
 end
+
 
 function RNN:addClone()
     local p,dp = self.recurrent:parameters()

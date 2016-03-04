@@ -16,7 +16,10 @@ function RNNAttention:__init(recurrent,dimoutput,reverse)
 	self.rnn = {}
 
 	self.zeros_y = torch.Tensor()
+
+	self.modules = {self.recurrent}
 end
+
 
 function RNNAttention:addClone()
 	local p,dp = self.recurrent:parameters()

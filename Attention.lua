@@ -207,7 +207,9 @@ function Attention:__init(decoder_recurrent,		-- recurrent part of the decoder ~
 	decoder.name = "decoder"
 
 	self.decoder = decoder
+	self.modules = {decoder}
 end
+
 
 function Attention:getRNNlayer(layername)
 	local rnn = self.rnn

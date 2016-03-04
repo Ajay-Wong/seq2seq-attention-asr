@@ -56,6 +56,7 @@ function LSTM:__init(diminput,dimoutput,peepholes)
 	self.next_c = next_c
 
 	self.lstm = nn.gModule({inp,prev_h,prev_c},{next_h,next_c})
+	self.modules = {self.lstm}
 end
 
 function LSTM:parameters()
