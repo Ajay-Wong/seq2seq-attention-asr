@@ -1,0 +1,154 @@
+require 'nn';
+require 'nngraph';
+
+
+local orthogonalize = function(m)
+    if m.weight and m.bias then
+        local w = torch.cat(m.weight,torch.view(m.bias,m.bias:size(1),1))
+        if w:size(1) < w:size(2) then
+            q,_ = torch.qr(w:t())
+            q = q:t()
+        else
+            q,_ = torch.qr(w)
+        end
+        m.weight:copy(q[{{},{1,m.weight:size(2)}}])
+        m.bias:copy(q[{{},m.weight:size(2)+1}])
+    elseif m.weight then
+        local w = m.weight
+        if w:size(1) < w:size(2) then
+            q,_ = torch.qr(w:t())
+            q = q:t()
+        else
+            q,_ = torch.qr(w)
+        end
+        m.weight:copy(q)
+    end
+end
+
+
+local checkOrthogonalization_ = function(m)
+	local prefix = prefix or ''
+    --print(prefix .. torch.typename(m))
+	local w
+    if m.weight and m.bias then
+        w = torch.cat(m.weight,torch.view(m.bias,m.bias:size(1),1))
+    elseif m.weight then
+        w = m.weight
+    end
+	if w then
+		local check
+		if w:size(1) > w:size(2) then
+			check = torch.mm(w:t(),w)
+		else
+			check = torch.mm(w,w:t())
+		end
+		local n = check:size(1)
+		--print(check)
+		local check = check - torch.eye(n)
+		return check:norm()
+	end
+end
+
+function columnNormConstraint(m,maxval)
+    local maxval = maxval or 1
+    if m.weight then
+        local norm = m.weight:norm(2,2):expandAs(m.weight) + 1e-12
+        local lt = torch.lt(norm,maxval):type(norm:type())
+        local ge = torch.gt(norm,maxval):type(norm:type())
+        local unchanged = torch.ones(norm:size()):type(norm:type()):cmul(lt)
+        --print(unchanged)
+        local constrained = torch.cmul(ge,norm):div(maxval)
+        --print(constrained)
+        local div = unchanged + constrained
+        m.weight:cdiv(div)
+        --print(m.weight:norm(2,1))
+    end
+	--[[
+    if m.bias then
+        local norm = m.bias:norm(2)
+        if norm > maxval then
+            m.bias:div(norm)
+        end
+        --print(m.bias:norm(2))
+    end]]
+end
+
+function checkColumnNormConstraint(m,maxval)
+    local maxval = maxval or 1
+    if m.weight then
+        print(m.weight:norm(2,2))
+    end
+	--[[
+    if m.bias then
+        print(m.bias:norm(2))
+    end]]
+end
+
+local apply2graph
+apply2graph = function(graph,func,toggleprint,prefix)
+	local prefix = prefix or ''
+	local list
+	local typename = torch.typename(graph) or ''
+	if typename == 'nn.gModule' then
+		list = graph.forwardnodes
+	elseif graph.modules then
+		list = graph.modules
+	else
+		if graph.weight then
+			if toggleprint then
+				print(prefix .. typename)
+			end
+		end
+		local returnval = func(graph)
+		if returnval then
+			if toggleprint then
+				print(prefix,returnval)
+			end
+		end
+	end
+	if list then
+		if toggleprint then
+			print(prefix .. typename)
+		end
+		local prefix = prefix .. '  '
+		for i,n in pairs(list) do
+			local m
+			if torch.typename(n) == 'nngraph.Node' then
+				m = n.data.module
+			else
+				m = n 
+			end
+			if m ~= nil then
+				apply2graph(m,func,toggleprint,prefix)
+			end
+		end
+	end
+end
+
+local orthogonalizeGraph = function(graph)
+	apply2graph(graph,orthogonalize)
+end
+
+local checkOrthogonalization = function(graph)
+	apply2graph(graph,checkOrthogonalization_,true)
+end
+
+local columnNormConstraintGraph = function(graph)
+	apply2graph(graph,columnNormConstraint)
+end
+
+local checkColumnNormConstraintGraph = function(graph)
+	apply2graph(graph,checkColumnNormConstraint,true)
+end
+
+TrainUtils = {
+			['orthogonalize'] = orthogonalize,
+			['orthogonalizeGraph'] = orthogonalizeGraph,
+			['checkOrthogonalization'] = checkOrthogonalization,
+			['columnNormConstraint'] = columnNormConstraint,
+			['columnNormConstraintGraph'] = columnNormConstraintGraph,
+			['checkColumnNormConstraint'] = checkColumnNormConstraint,
+			['checkColumnNormConstraintGraph'] = checkColumnNormConstraintGraph,
+		}
+
+return TrainUtils
