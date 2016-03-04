@@ -58,8 +58,8 @@ function loaddata(filepath,labelset)
 	local i=0
 	for k,d in pairs(data) do
 		i=i+1
-		dataset.x[i] = d.x:cuda()
-		dataset.y[i] = d[labelset]:cuda()
+		dataset.x[i] = d.x
+		dataset.y[i] = d[labelset]
 	end
 	dataset.numSamples = i
 	return dataset
