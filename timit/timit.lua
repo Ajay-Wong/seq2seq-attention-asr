@@ -346,8 +346,10 @@ function Train()
 		if opt.colnormconstr then
 			TrainUtils.columnNormConstraintGraph(autoencoder)
 		end
-		if t % 10 == 0 then
+		if t % 100 == 0 then
 			print('\ntrain gradnorm =', gradnorms[#gradnorms])
+			print('parameters:norm() =',parameters:norm())
+			print('parameters:std() =',parameters:std())
 			local accuracy = numCorrect/numPredictions
 			print('train accuracy =',torch.round(100*100*accuracy)/100 .. '%')
 			if opt.adaweightnoise then
