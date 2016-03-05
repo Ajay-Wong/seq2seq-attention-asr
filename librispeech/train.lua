@@ -285,10 +285,11 @@ end
 
 	
 -- training and validation loop
-local trainLog     = {}
-local validLog     = {}
-local bestAccuracy = 0
-local bestCER      = 1e20
+logs         = {}
+logs.train   = {}
+logs.valid   = {}
+bestAccuracy = 0
+bestCER      = 1e20
 for epoch = 1, opt.numEpochs do
 	print('---------- epoch ' .. epoch .. '----------')
 	local start = sys.clock()
@@ -316,9 +317,9 @@ for epoch = 1, opt.numEpochs do
 	print('\ntraining time   =', torch.round(trainTime) .. ' minutes')
 	
 	-- update training logs
-	trainLog.accuracy  = updateLog(trainAccuracy, trainLog.accuracy)
-	trainLog.nll       = updateLog(trainNLL, trainLog.nll)
-	trainLog.gradnorms = updateLog(gradnorms, trainLog.gradnorms)
+	logs.train.accuracy  = updateLog(trainAccuracy, logs.train.accuracy)
+	logs.train.nll       = updateLog(trainNLL, logs.train.nll)
+	logs.train.gradnorms = updateLog(gradnorms, logs.train.gradnorms)
 
 	-- print useful statistics
 	print('train Accuracy  =', torch.round(100*100*trainAccuracy)/100 .. '%')
@@ -326,9 +327,10 @@ for epoch = 1, opt.numEpochs do
 	print('||grad||        =', gradients:norm())
 
 	-- collect some useful outputs
-	local alpha_train = decoder:alpha():float()
-	local Ws_train    = decoder:Ws():float()
-	local Vh_train    = decoder.Vh.output:float()
+	logs.train.alpha  = decoder:alpha():float()
+	logs.train.Ws     = decoder:Ws():float()
+	logs.train.Vh     = decoder.Vh.output:float()
+	logs.train.output = autoencoder.output:float()
 	
 	-- validation
 	local start = sys.clock()
@@ -339,9 +341,9 @@ for epoch = 1, opt.numEpochs do
 
 	-- update validation logs
 	local start = sys.clock()
-	validLog.accuracy  = updateLog(validAccuracy, validLog.accuracy)
-	validLog.nll       = updateLog(validNLL, validLog.nll)
-	validLog.CER       = updateLog(validCER, validLog.CER)
+	logs.valid.accuracy  = updateLog(validAccuracy, logs.valid.accuracy)
+	logs.valid.nll       = updateLog(validNLL, logs.valid.nll)
+	logs.valid.CER       = updateLog(validCER, logs.valid.CER)
 
 	-- print useful statistics
 	print('valid Accuracy  =', torch.round(100*100*validAccuracy)/100 .. '%')
@@ -349,23 +351,16 @@ for epoch = 1, opt.numEpochs do
 	print('valid CER       =', torch.round(100*100*validCER)/100 .. '%')
 
 	-- collect some useful outputs
-	local alpha_valid = decoder:alpha():float()
-	local Ws_valid    = decoder:Ws():float()
-	local Vh_valid    = decoder.Vh.output:float()
+	logs.valid.alpha   = decoder:alpha():float()
+	logs.valid.Ws      = decoder:Ws():float()
+	logs.valid.Vh      = decoder.Vh.output:float()
+	logs.valid.output  = autencoder.output:float()
 	
 	-- save logs and outputs
 	print('saving to ' .. opt.savedir)
 	sys.execute('mkdir -p ' .. opt.savedir)
 	local writeFile = hdf5.open(paths.concat(opt.savedir,'log.h5'),'w')
-	writeFile:write('train',trainLog)
-	writeFile:write('valid',validLog)
-	writeFile:write('alpha_train',alpha_train)
-	writeFile:write('alpha_valid',alpha_valid)
-	writeFile:write('Ws_train',Ws_train)
-	writeFile:write('Ws_valid',Ws_valid)
-	writeFile:write('Vh_train',Vh_train)
-	writeFile:write('Vh_valid',Vh_valid)
-	writeFile:write('output',autoencoder.output:float())
+	writeFile:write('logs',logs)
 	writeFile:close()
 
 	-- save current model
@@ -373,11 +368,11 @@ for epoch = 1, opt.numEpochs do
 	torch.save(paths.concat(opt.savedir,'predictions.t7'),predictions)
 
 	-- save best model according to accuracy
-	if validAccuracy > bestAccuracy then
-		bestAccuracy = validAccuracy
-		torch.save(paths.concat(opt.savedir,'model_best_valid_accuracy.t7'),model)
-		torch.save(paths.concat(opt.savedir,'predictions_best_valid_accuracy.t7'),predictions)
-	end
+--	if validAccuracy > bestAccuracy then
+--		bestAccuracy = validAccuracy
+--		torch.save(paths.concat(opt.savedir,'model_best_valid_accuracy.t7'),model)
+--		torch.save(paths.concat(opt.savedir,'predictions_best_valid_accuracy.t7'),predictions)
+--	end
 
 	-- save best model according to error rate
 	if validCER < bestCER then
