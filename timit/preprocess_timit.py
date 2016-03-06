@@ -177,7 +177,7 @@ map39 = {k[0]:{'index':vocab39[k[2]],'phoneme':k[2]} for k in kaldi_phonemes}
 with open(os.path.join(savedir,'phonemes.txt'),'w') as f:
     f.write('index60,phoneme60,index48,phoneme48,index39,phoneme39\n')
     for k,v in sorted(list(phonemes.iteritems()),key = lambda x:x[1]):
-        f.write('%s,%s,%s,%s,%s,%s\n' % (v+1,k,map48[k]['index']+1,map48[k]['phoneme'],map39[k]['index']+1,map39[k]['phoneme']))
+        f.write('%s,%s,%s,%s,%s,%s\n' % (v,k,map48[k]['index']+1,map48[k]['phoneme'],map39[k]['index']+1,map39[k]['phoneme']))
 
 #------------------- digitize phonemes --------------------
 print 'digitize phonemes'
