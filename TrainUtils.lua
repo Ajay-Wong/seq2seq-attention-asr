@@ -52,15 +52,45 @@ end
 function columnNormConstraint(m,maxval)
     local maxval = maxval or 1
     if m.weight then
-        local norm = m.weight:norm(2,2):expandAs(m.weight) + 1e-12
+		local nan_check = m.weight:norm()
+		if nan_check ~= nan_check then
+			print('\nmodule',m)
+			print('prior to colnorm constraint')
+			print('nan_check:',nan_check)
+			__debug_module = m
+			error('found a nan, module saved to __debug_module')
+		end
+        local norm = m.weight:norm(2,2):expandAs(m.weight) + 1e-8
         local lt = torch.lt(norm,maxval):type(norm:type())
-        local ge = torch.gt(norm,maxval):type(norm:type())
+        local ge = torch.ge(norm,maxval):type(norm:type())
         local unchanged = torch.ones(norm:size()):type(norm:type()):cmul(lt)
         --print(unchanged)
         local constrained = torch.cmul(ge,norm):div(maxval)
         --print(constrained)
         local div = unchanged + constrained
+		local nan_check = div:norm()
+		if nan_check ~= nan_check then
+			print('\nmodule',m)
+			print('during colnorm constraint')
+			print('nan_check:',nan_check)
+			__debug_module = m
+			error('found a nan, module saved to __debug_module')
+		end
+		if div:eq(0):any() then
+			print('\nmodule',m)
+			print('zeros in divisor during colnorm constraint')
+			__debug_module = m
+			error('found a nan, module saved to __debug_module')
+		end
         m.weight:cdiv(div)
+		local nan_check = m.weight:norm()
+		if nan_check ~= nan_check then
+			print('\nmodule:',m)
+			print('norm:',norm:norm())
+			print('nan_check:',nan_check)
+			__debug_module = m
+			error('found a nan, module saved to __debug_module')
+		end
         --print(m.weight:norm(2,1))
     end
 	--[[
@@ -84,6 +114,26 @@ function checkColumnNormConstraint(m,maxval)
     end]]
 end
 
+local getnorms
+getnorms = function(t)
+	if type(t) == 'table' then
+		local norms = {}
+		for k,v in pairs(t) do
+			norms[k] = getnorms(v)
+		end
+		return norms
+	else
+		return t:norm()
+	end
+end
+
+local checkoutput
+checkoutput = function(m)
+	if m.output then
+		return getnorms(m.output)
+	end
+end
+
 local apply2graph
 apply2graph = function(graph,func,toggleprint,prefix)
 	local prefix = prefix or ''
@@ -96,7 +146,11 @@ apply2graph = function(graph,func,toggleprint,prefix)
 	else
 		if graph.weight then
 			if toggleprint then
-				print(prefix .. typename)
+				local printname = typename
+				if graph.__tostring__ then
+					printname = graph:__tostring__()
+				end
+				print(prefix .. printname)
 			end
 		end
 		local returnval = func(graph)
@@ -108,7 +162,11 @@ apply2graph = function(graph,func,toggleprint,prefix)
 	end
 	if list then
 		if toggleprint then
-			print(prefix .. typename)
+			local printname = typename
+			if graph.__tostring__ then
+				printname = graph:__tostring__()
+			end
+			print(prefix .. printname)
 		end
 		local prefix = prefix .. '  '
 		for i,n in pairs(list) do
@@ -149,6 +207,9 @@ TrainUtils = {
 			['columnNormConstraintGraph'] = columnNormConstraintGraph,
 			['checkColumnNormConstraint'] = checkColumnNormConstraint,
 			['checkColumnNormConstraintGraph'] = checkColumnNormConstraintGraph,
+			['apply2graph'] = apply2graph,
+			['getnorms'] = getnorms,
+			['checkoutput'] = checkoutput
 		}
 
 return TrainUtils
