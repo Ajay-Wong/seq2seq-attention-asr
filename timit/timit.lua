@@ -171,9 +171,9 @@ end
 autoencoder           = autoencoder:cuda()
 parameters, gradients = autoencoder:getParameters()
 
-if initialization then
-	initialization(parameters)
-end
+--if initialization then
+--	initialization(parameters)
+--end
 
 ------------------ Train ------------------
 optimMethod = optimMethod or optim.adadelta
